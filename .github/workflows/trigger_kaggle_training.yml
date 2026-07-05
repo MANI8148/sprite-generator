@@ -1,0 +1,76 @@
+name: Trigger Kaggle Training
+
+on:
+  workflow_dispatch:
+    inputs:
+      epochs_vqvae:
+        description: 'VQ-VAE epochs'
+        default: '50'
+      epochs_transformer:
+        description: 'Transformer epochs'
+        default: '50'
+  push:
+    tags:
+      - 'train-*'
+
+jobs:
+  trigger-kaggle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Kaggle CLI
+        run: |
+          pip install kaggle
+          mkdir -p ~/.kaggle
+          echo '{"username":"${{ secrets.KAGGLE_USERNAME }}","key":"${{ secrets.KAGGLE_KEY }}"}' > ~/.kaggle/kaggle.json
+          chmod 600 ~/.kaggle/kaggle.json
+
+      - name: Push kernel to Kaggle
+        run: |
+          kaggle kernels push -p kaggle/
+
+      - name: Wait for training to complete
+        run: |
+          KERNEL_ID="mani8148/sprite-generator-training"
+          echo "Waiting for $KERNEL_ID..."
+          while true; do
+            STATUS=$(kaggle kernels status "$KERNEL_ID" 2>/dev/null)
+            echo "$STATUS"
+            if echo "$STATUS" | grep -q "complete"; then
+              echo "Training complete!"
+              break
+            fi
+            if echo "$STATUS" | grep -q "error"; then
+              echo "Training failed!"
+              kaggle kernels output "$KERNEL_ID" -p /tmp/kaggle-output
+              exit 1
+            fi
+            sleep 60
+          done
+
+      - name: Download kernel output
+        run: |
+          kaggle kernels output "$KERNEL_ID" -p /tmp/kaggle-output
+
+      - name: Verify training_complete marker on HF
+        run: |
+          pip install huggingface_hub
+          python -c "
+from huggingface_hub import HfApi
+api = HfApi()
+try:
+    data = api.hf_hub_download(
+        '${{ vars.HF_MODEL_REPO || \"mani8148/sprite-generator-model\" }}',
+        'training_complete.json',
+        token='${{ secrets.HF_TOKEN }}'
+    )
+    with open(data) as f:
+        import json
+        status = json.load(f)
+        assert status.get('status') == 'complete', 'Training not marked complete'
+        print('Training verified: OK')
+except Exception as e:
+    print(f'Verification failed: {e}')
+    exit(1)
+"

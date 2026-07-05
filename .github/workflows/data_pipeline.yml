@@ -1,0 +1,41 @@
+name: Data Pipeline
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'  # weekly
+
+jobs:
+  data-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+          pip install requests imagehash
+
+      - name: Scrape sources
+        run: python data/scripts/scrape_sources.py --output data/raw
+
+      - name: Clean and normalize
+        run: python data/scripts/clean_normalize.py \
+          --input data/raw --output data/processed \
+          --canvas-size 32 --palette-size 24
+
+      - name: AI Captioning
+        run: python data/scripts/caption_ai.py \
+          --input data/processed --output data/processed/metadata_labeled.json
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+      - name: Push to HF Datasets
+        run: python data/scripts/push_to_hf.py \
+          --input data/processed \
+          --repo ${{ vars.HF_DATASET_REPO || 'mani8148/sprites' }} \
+          --token ${{ secrets.HF_TOKEN }}

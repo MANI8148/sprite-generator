@@ -1,0 +1,51 @@
+name: Auto-Improve
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  improve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set git identity
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          git config user.email "manikantapotla3@gmail.com"
+          git config user.name "MANI8148"
+          git remote set-url origin \
+            "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt 2>/dev/null || true
+          npm install -g opencode-ai
+
+      - name: Start AI server
+        run: |
+          opencode serve --port 4096 &
+          sleep 5
+
+      - name: AI writes code
+        run: |
+          opencode run --auto --dir . --attach http://127.0.0.1:4096 \
+            --model opencode/deepseek-v4-flash-free \
+            "Read ROADMAP.md and the full codebase.
+             Run tests to check state.
+             Pick exactly one unfinished roadmap item (lowest number).
+             Implement it with automated tests.
+             Run all tests again. They must all pass.
+             Commit and push."
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}

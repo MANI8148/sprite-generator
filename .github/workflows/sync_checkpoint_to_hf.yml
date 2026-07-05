@@ -1,0 +1,70 @@
+name: Sync Checkpoint to HF
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Trigger Kaggle Training]
+    types:
+      - completed
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install deps
+        run: pip install huggingface_hub
+
+      - name: Verify and update model card
+        run: |
+          python -c "
+from huggingface_hub import HfApi
+api = HfApi()
+repo = '${{ vars.HF_MODEL_REPO || \"mani8148/sprite-generator-model\" }}'
+
+# Check latest checkpoint exists
+try:
+    files = api.list_repo_files(repo, repo_type='model', token='${{ secrets.HF_TOKEN }}')
+    checkpoints = [f for f in files if f.endswith('.pt')]
+    print(f'Found {len(checkpoints)} checkpoints: {checkpoints[-3:]}')
+except Exception as e:
+    print(f'No checkpoints found yet: {e}')
+    exit(0)
+
+# Update README with latest info
+readme = f'''---
+license: cc0
+tags:
+- sprite-generator
+- pixel-art
+- vqvae
+- transformer
+---
+
+# Sprite Generator Model
+
+Trained on Kaggle GPU. Latest checkpoint pushed automatically.
+
+## Checkpoints
+
+Latest: {checkpoints[-1] if checkpoints else \"N/A\"}
+Total: {len(checkpoints)}
+
+## Usage
+
+See the [main repo](https://github.com/${{{{ github.repository }}}}) for training and inference code.
+'''
+api.upload_file(
+    path_or_fileobj=readme.encode(),
+    path_in_repo='README.md',
+    repo_id=repo,
+    repo_type='model',
+    token='${{ secrets.HF_TOKEN }}',
+)
+print('Model card updated')
+"

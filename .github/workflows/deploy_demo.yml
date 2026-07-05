@@ -1,0 +1,57 @@
+name: Deploy Demo to HF Spaces
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'demo/**'
+      - 'models/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Push to HF Spaces
+        run: |
+          pip install huggingface_hub
+          python -c "
+from huggingface_hub import HfApi
+import os
+
+api = HfApi()
+space_repo = '${{ vars.HF_SPACE_REPO || \"mani8148/sprite-generator-demo\" }}'
+token = '${{ secrets.HF_TOKEN }}'
+
+# Upload demo files
+for root, dirs, files in os.walk('demo'):
+    for fname in files:
+        local_path = os.path.join(root, fname)
+        repo_path = os.path.relpath(local_path, 'demo')
+        api.upload_file(
+            path_or_fileobj=local_path,
+            path_in_repo=repo_path,
+            repo_id=space_repo,
+            repo_type='space',
+            token=token,
+        )
+        print(f'Uploaded {repo_path}')
+
+# Upload models
+for root, dirs, files in os.walk('models'):
+    for fname in files:
+        if fname.endswith('.py'):
+            local_path = os.path.join(root, fname)
+            repo_path = os.path.relpath(local_path, '.')
+            api.upload_file(
+                path_or_fileobj=local_path,
+                path_in_repo=repo_path,
+                repo_id=space_repo,
+                repo_type='space',
+                token=token,
+            )
+            print(f'Uploaded {repo_path}')
+print('Deploy complete')
+"
