@@ -26,8 +26,21 @@ jobs:
           echo '{"username":"${{ secrets.KAGGLE_USERNAME }}","key":"${{ secrets.KAGGLE_KEY }}"}' > ~/.kaggle/kaggle.json
           chmod 600 ~/.kaggle/kaggle.json
 
-      - name: Push kernel to Kaggle
+      - name: Inject GH_TOKEN into notebook and push
         run: |
+          python3 -c "
+import json
+with open('kaggle/kaggle_train_kernel.ipynb') as f:
+    nb = json.load(f)
+# Update the clone cell to include token
+for cell in nb['cells']:
+    src = ''.join(cell['source'])
+    if 'GH_TOKEN' in src and '{GH_TOKEN}' in src:
+        cell['source'] = [s.replace('{GH_TOKEN}', '${{ github.token }}') for s in cell['source']]
+with open('kaggle/kaggle_train_kernel.ipynb', 'w') as f:
+    json.dump(nb, f, indent=1)
+print('Token injected')
+"
           kaggle kernels push -p kaggle/
 
       - name: Set kernel ID
