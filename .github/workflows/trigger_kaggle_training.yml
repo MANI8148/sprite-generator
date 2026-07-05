@@ -61,12 +61,10 @@ jobs:
           python3 -c "
           from huggingface_hub import HfApi
           api = HfApi()
+          repo = 'darklord8777/sprite-generator-model'
+          token = '${{ secrets.HF_TOKEN }}'
           try:
-              data = api.hf_hub_download(
-                  '${{ vars.HF_MODEL_REPO || \"darklord8777/sprite-generator-model\" }}',
-                  'training_complete.json',
-                  token='${{ secrets.HF_TOKEN }}'
-              )
+              data = api.hf_hub_download(repo, 'training_complete.json', token=token)
               with open(data) as f:
                   import json
                   status = json.load(f)
