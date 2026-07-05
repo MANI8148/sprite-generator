@@ -22,49 +22,35 @@ jobs:
 
       - name: Verify and update model card
         run: |
-          python -c "
-from huggingface_hub import HfApi
-api = HfApi()
-repo = '${{ vars.HF_MODEL_REPO || \"darklord8777/sprite-generator-model\" }}'
+          python3 << 'PYEOF'
+          from huggingface_hub import HfApi
+          api = HfApi()
+          repo = '${{ vars.HF_MODEL_REPO || "darklord8777/sprite-generator-model" }}'
+          token = '${{ secrets.HF_TOKEN }}'
 
-# Check latest checkpoint exists
-try:
-    files = api.list_repo_files(repo, repo_type='model', token='${{ secrets.HF_TOKEN }}')
-    checkpoints = [f for f in files if f.endswith('.pt')]
-    print(f'Found {len(checkpoints)} checkpoints: {checkpoints[-3:]}')
-except Exception as e:
-    print(f'No checkpoints found yet: {e}')
-    exit(0)
+          try:
+              files = api.list_repo_files(repo, repo_type='model', token=token)
+              checkpoints = [f for f in files if f.endswith('.pt')]
+              print(f'Found {len(checkpoints)} checkpoints: {checkpoints[-3:]}')
+          except Exception as e:
+              print(f'No checkpoints found yet: {e}')
+              exit(0)
 
-# Update README with latest info
-readme = f'''---
-license: cc0
-tags:
-- sprite-generator
-- pixel-art
-- vqvae
-- transformer
----
+          readme = "---\nlicense: cc0\ntags:\n- sprite-generator\n- pixel-art\n- vqvae\n- transformer\n---\n\n"
+          readme += "# Sprite Generator Model\n\n"
+          readme += "Trained on Kaggle GPU. Latest checkpoint pushed automatically.\n\n"
+          readme += "## Checkpoints\n\n"
+          readme += f"Latest: {checkpoints[-1] if checkpoints else 'N/A'}\n"
+          readme += f"Total: {len(checkpoints)}\n\n"
+          readme += "## Usage\n\n"
+          readme += f"See the [main repo](https://github.com/MANI8148/sprite-generator) for training and inference code.\n"
 
-# Sprite Generator Model
-
-Trained on Kaggle GPU. Latest checkpoint pushed automatically.
-
-## Checkpoints
-
-Latest: {checkpoints[-1] if checkpoints else \"N/A\"}
-Total: {len(checkpoints)}
-
-## Usage
-
-See the [main repo](https://github.com/${{ github.repository }}) for training and inference code.
-'''
-api.upload_file(
-    path_or_fileobj=readme.encode(),
-    path_in_repo='README.md',
-    repo_id=repo,
-    repo_type='model',
-    token='${{ secrets.HF_TOKEN }}',
-)
-print('Model card updated')
-"
+          api.upload_file(
+              path_or_fileobj=readme.encode(),
+              path_in_repo='README.md',
+              repo_id=repo,
+              repo_type='model',
+              token=token,
+          )
+          print('Model card updated')
+          PYEOF
