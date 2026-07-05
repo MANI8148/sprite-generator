@@ -1,0 +1,148 @@
+import torch
+import pytest
+
+from models.vqvae.model import (
+    VQVAE, Encoder, Decoder, VectorQuantizer, ResidualBlock
+)
+
+
+class TestResidualBlock:
+    def test_output_shape(self):
+        block = ResidualBlock(64)
+        x = torch.randn(2, 64, 8, 8)
+        out = block(x)
+        assert out.shape == x.shape
+
+    def test_residual_connection(self):
+        block = ResidualBlock(32)
+        x = torch.randn(1, 32, 16, 16)
+        out = block(x)
+        assert out.shape == x.shape
+
+
+class TestEncoder:
+    def test_output_shape(self):
+        encoder = Encoder(in_channels=4, hidden_dim=128, latent_dim=64)
+        x = torch.randn(2, 4, 32, 32)
+        out = encoder(x)
+        assert out.shape == (2, 64, 8, 8)
+
+    def test_different_batch_size(self):
+        encoder = Encoder()
+        x = torch.randn(4, 4, 32, 32)
+        out = encoder(x)
+        assert out.shape == (4, 64, 8, 8)
+
+
+class TestDecoder:
+    def test_output_shape(self):
+        decoder = Decoder(out_channels=4, hidden_dim=128, latent_dim=64)
+        z = torch.randn(2, 64, 8, 8)
+        out = decoder(z)
+        assert out.shape == (2, 4, 32, 32)
+
+    def test_different_batch_size(self):
+        decoder = Decoder()
+        z = torch.randn(4, 64, 8, 8)
+        out = decoder(z)
+        assert out.shape == (4, 4, 32, 32)
+
+
+class TestVectorQuantizer:
+    def test_output_shapes(self):
+        quantizer = VectorQuantizer(num_embeddings=256, embedding_dim=64)
+        z = torch.randn(2, 64, 8, 8)
+        quantized, vq_loss, indices = quantizer(z)
+        assert quantized.shape == z.shape
+        assert isinstance(vq_loss, torch.Tensor) and vq_loss.ndim == 0
+        assert indices.shape == (2 * 8 * 8,)
+
+    def test_codebook_entry(self):
+        quantizer = VectorQuantizer(num_embeddings=256, embedding_dim=64)
+        indices = torch.randint(0, 256, (16,))
+        entries = quantizer.get_codebook_entry(indices)
+        assert entries.shape == (16, 64)
+
+    def test_indices_in_range(self):
+        quantizer = VectorQuantizer(num_embeddings=256, embedding_dim=64)
+        z = torch.randn(1, 64, 8, 8)
+        _, _, indices = quantizer(z)
+        assert indices.min() >= 0
+        assert indices.max() < 256
+
+    def test_commitment_cost(self):
+        quantizer = VectorQuantizer(num_embeddings=128, embedding_dim=32, commitment_cost=0.5)
+        z = torch.randn(1, 32, 4, 4)
+        _, vq_loss, _ = quantizer(z)
+        assert vq_loss.item() >= 0
+
+
+class TestVQVAE:
+    def test_forward_shapes(self):
+        model = VQVAE()
+        x = torch.randn(2, 4, 32, 32)
+        out = model(x)
+        assert out["recon"].shape == x.shape
+        assert list(out["indices"].shape) == [2, 64]
+        assert isinstance(out["loss"], torch.Tensor)
+        assert isinstance(out["recon_loss"], torch.Tensor)
+        assert isinstance(out["vq_loss"], torch.Tensor)
+
+    def test_loss_non_negative(self):
+        model = VQVAE()
+        x = torch.randn(2, 4, 32, 32)
+        out = model(x)
+        assert out["loss"].item() >= 0
+        assert out["recon_loss"].item() >= 0
+        assert out["vq_loss"].item() >= 0
+
+    def test_encode_to_indices(self):
+        model = VQVAE()
+        x = torch.randn(2, 4, 32, 32)
+        indices = model.encode_to_indices(x)
+        assert indices.shape == (2, 64)
+        assert indices.dtype == torch.long
+
+    def test_decode_from_indices(self):
+        model = VQVAE()
+        indices = torch.randint(0, 256, (2, 64))
+        recon = model.decode_from_indices(indices, (64, 8, 8))
+        assert recon.shape == (2, 4, 32, 32)
+
+    def test_encode_decode_cycle(self):
+        model = VQVAE()
+        x = torch.randn(2, 4, 32, 32)
+        indices = model.encode_to_indices(x)
+        recon = model.decode_from_indices(indices, (64, 8, 8))
+        assert recon.shape == x.shape
+
+    def test_gradient_flow(self):
+        model = VQVAE()
+        x = torch.randn(2, 4, 32, 32)
+        out = model(x)
+        loss = out["loss"]
+        loss.backward()
+        for name, param in model.named_parameters():
+            assert param.grad is not None, f"Parameter {name} has no gradient"
+
+    @pytest.fixture
+    def small_model(self):
+        return VQVAE(in_channels=4, hidden_dim=32, latent_dim=16, num_embeddings=32)
+
+    def test_small_model_shapes(self, small_model):
+        x = torch.randn(2, 4, 32, 32)
+        out = small_model(x)
+        assert out["recon"].shape == x.shape
+
+    def test_overfit_constant_input(self):
+        model = VQVAE(in_channels=4, hidden_dim=64, latent_dim=32, num_embeddings=64)
+        optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
+        x = torch.ones(4, 4, 32, 32)
+        initial_loss = model(x)["loss"].item()
+        for _ in range(100):
+            optimizer.zero_grad()
+            loss = model(x)["loss"]
+            loss.backward()
+            optimizer.step()
+        final_loss = model(x)["loss"].item()
+        assert final_loss < initial_loss, f"Loss did not decrease: {initial_loss:.4f} -> {final_loss:.4f}"

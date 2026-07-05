@@ -83,11 +83,9 @@ class VectorQuantizer(nn.Module):
         quantized = torch.matmul(encodings, self.embedding.weight)
         quantized = quantized.view_as(z)
 
-        # Straight-through estimator
-        quantized = z + (quantized - z).detach()
+        vq_loss = F.mse_loss(quantized, z.detach()) + self.commitment_cost * F.mse_loss(quantized.detach(), z)
 
-        # Loss
-        vq_loss = F.mse_loss(quantized.detach(), z) + self.commitment_cost * F.mse_loss(quantized, z.detach())
+        quantized = z + (quantized - z).detach()
 
         return quantized, vq_loss, encoding_indices
 
