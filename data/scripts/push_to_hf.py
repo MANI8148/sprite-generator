@@ -100,7 +100,7 @@ def main():
     # Also push palette as a dataset card
     if palette:
         card_content = f"""---
-license: cc0
+license: cc0-1.0
 dataset_info:
 - config_name: default
   features:

@@ -37,7 +37,7 @@ jobs:
               exit(0)
 
           readme = '---\n'
-          readme += 'license: cc0\n'
+          readme += 'license: cc0-1.0\n'
           readme += 'tags:\n'
           readme += '- sprite-generator\n'
           readme += '- pixel-art\n'
