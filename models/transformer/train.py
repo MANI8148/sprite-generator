@@ -52,11 +52,11 @@ class TokenDataset(torch.utils.data.Dataset):
         item = self.dataset[idx]
         img = item["image"].convert("RGBA")
         img = img.resize((self.image_size, self.image_size), Image.NEAREST)
-        img_tensor = torch.tensor(np.array(img).astype(np.float32) / 255.0).permute(2, 0, 1).to(self.device)
+        img_tensor = torch.tensor(np.array(img).astype(np.float32) / 255.0).permute(2, 0, 1)
 
         with torch.no_grad():
-            indices = self.vqvae.encode_to_indices(img_tensor.unsqueeze(0))
-        tokens = indices.squeeze(0)  # (seq_len,)
+            indices = self.vqvae.encode_to_indices(img_tensor.unsqueeze(0).to(self.device))
+        tokens = indices.squeeze(0).cpu()  # (seq_len,)
 
         class_id = encode_condition(item.get("class", "unknown"), CLASS_VOCAB)
         action_id = encode_condition(item.get("action", "idle"), ACTION_VOCAB)
@@ -93,7 +93,7 @@ def main():
 
     # Token dataset
     dataset = TokenDataset(args.dataset, vqvae, device)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=2,
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=0,
                             collate_fn=lambda batch: (
                                 torch.stack([b[0] for b in batch]),
                                 torch.stack([b[1] for b in batch]),
