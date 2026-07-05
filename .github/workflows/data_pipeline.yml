@@ -37,5 +37,5 @@ jobs:
       - name: Push to HF Datasets
         run: python data/scripts/push_to_hf.py \
           --input data/processed \
-          --repo ${{ vars.HF_DATASET_REPO || 'mani8148/sprites' }} \
+          --repo ${{ vars.HF_DATASET_REPO || 'darklord8777/sprites' }} \
           --token ${{ secrets.HF_TOKEN }}

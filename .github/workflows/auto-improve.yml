@@ -47,5 +47,3 @@ jobs:
              Implement it with automated tests.
              Run all tests again. They must all pass.
              Commit and push."
-        env:
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}

@@ -25,7 +25,7 @@ jobs:
           python -c "
 from huggingface_hub import HfApi
 api = HfApi()
-repo = '${{ vars.HF_MODEL_REPO || \"mani8148/sprite-generator-model\" }}'
+repo = '${{ vars.HF_MODEL_REPO || \"darklord8777/sprite-generator-model\" }}'
 
 # Check latest checkpoint exists
 try:

@@ -22,7 +22,7 @@ from huggingface_hub import HfApi
 import os
 
 api = HfApi()
-space_repo = '${{ vars.HF_SPACE_REPO || \"mani8148/sprite-generator-demo\" }}'
+space_repo = '${{ vars.HF_SPACE_REPO || \"darklord8777/sprite-generator-demo\" }}'
 token = '${{ secrets.HF_TOKEN }}'
 
 # Upload demo files

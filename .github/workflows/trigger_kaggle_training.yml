@@ -32,7 +32,7 @@ jobs:
 
       - name: Wait for training to complete
         run: |
-          KERNEL_ID="mani8148/sprite-generator-training"
+          KERNEL_ID="potlamanikanta/sprite-generator-training"
           echo "Waiting for $KERNEL_ID..."
           while true; do
             STATUS=$(kaggle kernels status "$KERNEL_ID" 2>/dev/null)
@@ -61,7 +61,7 @@ from huggingface_hub import HfApi
 api = HfApi()
 try:
     data = api.hf_hub_download(
-        '${{ vars.HF_MODEL_REPO || \"mani8148/sprite-generator-model\" }}',
+        '${{ vars.HF_MODEL_REPO || \"darklord8777/sprite-generator-model\" }}',
         'training_complete.json',
         token='${{ secrets.HF_TOKEN }}'
     )

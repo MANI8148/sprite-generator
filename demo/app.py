@@ -109,7 +109,7 @@ def build_demo(vqvae, transformer, device):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--hf-repo", default="mani8148/sprite-generator-model")
+    parser.add_argument("--hf-repo", default="darklord8777/sprite-generator-model")
     parser.add_argument("--hf-token", default=None)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--share", action="store_true")

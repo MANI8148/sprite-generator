@@ -84,7 +84,7 @@ def generate_grid(vqvae, transformer, device, grid_size=(4, 4), output_path="sam
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--hf-repo", default="mani8148/sprite-generator-model")
+    parser.add_argument("--hf-repo", default="darklord8777/sprite-generator-model")
     parser.add_argument("--output", "-o", default="samples.png")
     parser.add_argument("--rows", type=int, default=4)
     parser.add_argument("--cols", type=int, default=4)
