@@ -6,6 +6,7 @@ import os
 import sys
 import zipfile
 import io
+import re
 import argparse
 import requests
 from pathlib import Path
@@ -120,12 +121,35 @@ PACKS = [
 ]
 
 
+def get_download_url(pack_name: str) -> str | None:
+    """Scrape the direct ZIP download URL from the Kenney asset page."""
+    page_url = f"https://kenney.nl/assets/{pack_name}"
+    try:
+        resp = requests.get(page_url, timeout=30)
+        resp.raise_for_status()
+        # Find download link like: /media/pages/assets/.../kenney_pack-name.zip
+        matches = re.findall(
+            rf'(/media/pages/assets/{re.escape(pack_name)}/[^"\']+\.zip)',
+            resp.text,
+        )
+        if matches:
+            return "https://kenney.nl" + matches[0]
+        # Fallback: find any .zip link
+        matches = re.findall(r'(https?://[^"\']+\.zip)', resp.text)
+        if matches:
+            return matches[0]
+        return None
+    except Exception:
+        return None
+
+
 def download_pack(pack_name: str, output_dir: Path) -> int:
-    url = f"https://kenney.nl/assets/{pack_name}"
-    zip_url = f"https://kenney.nl/Content/Downloads/{pack_name}.zip"
+    zip_url = get_download_url(pack_name)
+    if not zip_url:
+        return 0
 
     try:
-        resp = requests.get(zip_url, timeout=30)
+        resp = requests.get(zip_url, timeout=60)
         if resp.status_code != 200:
             return 0
 
