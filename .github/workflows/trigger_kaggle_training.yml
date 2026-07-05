@@ -30,9 +30,11 @@ jobs:
         run: |
           kaggle kernels push -p kaggle/
 
+      - name: Set kernel ID
+        run: echo "KERNEL_ID=potlamanikanta/sprite-generator-training" >> $GITHUB_ENV
+
       - name: Wait for training to complete
         run: |
-          KERNEL_ID="potlamanikanta/sprite-generator-training"
           echo "Waiting for $KERNEL_ID..."
           while true; do
             STATUS=$(kaggle kernels status "$KERNEL_ID" 2>/dev/null)

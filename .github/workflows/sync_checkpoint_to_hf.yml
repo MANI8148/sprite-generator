@@ -57,7 +57,7 @@ Total: {len(checkpoints)}
 
 ## Usage
 
-See the [main repo](https://github.com/${{{{ github.repository }}}}) for training and inference code.
+See the [main repo](https://github.com/${{ github.repository }}) for training and inference code.
 '''
 api.upload_file(
     path_or_fileobj=readme.encode(),
