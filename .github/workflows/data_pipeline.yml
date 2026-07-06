@@ -40,9 +40,8 @@ jobs:
       - name: AI Captioning
         run: |
           python data/scripts/caption_ai.py \
-            --input data/processed --output data/processed/metadata_labeled.json
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+            --input data/processed --output data/processed/metadata_labeled.json \
+            --hf-token ${{ secrets.HF_TOKEN }}
 
       - name: Augment dataset (4x)
         run: |

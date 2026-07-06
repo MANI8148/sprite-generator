@@ -42,7 +42,7 @@ def generate_grid(vqvae, transformer, device, grid_size=(4, 4), output_path="sam
     classes = ["character", "item", "enemy", "weapon", "vehicle", "animal", "plant", "tile",
                "ui_element", "projectile", "furniture", "decoration", "food", "tool", "accessory", "building"]
     actions = ["idle", "walk", "run", "attack", "jump", "hurt", "death", "block",
-               "shoot", "cast", "interact", "fly", "swim", "climb", "front", "left"]
+               "shoot", "cast", "interact", "fly", "swim", "climb"]
     directions = ["front", "back", "left", "right"]
     temperatures = [0.6, 0.8, 1.0, 1.2]
 
@@ -65,10 +65,7 @@ def generate_grid(vqvae, transformer, device, grid_size=(4, 4), output_path="sam
                 top_p=0.9,
             )
 
-        latent_shape = (vqvae.latent_dim, 8, 8)
-        z = vqvae.quantizer.get_codebook_entry(indices.view(-1))
-        z = z.view(-1, *latent_shape)
-        recon = vqvae.decoder(z)
+        recon = vqvae.decode_from_indices(indices, (vqvae.latent_dim, 8, 8))
 
         img_arr = recon[0].permute(1, 2, 0).cpu().numpy()
         img_arr = (img_arr * 255).clip(0, 255).astype(np.uint8)

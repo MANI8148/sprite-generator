@@ -67,11 +67,7 @@ def generate_sprite(
             top_p=top_p,
         )
 
-        # Decode through VQ-VAE
-        latent_shape = (vqvae.latent_dim, 8, 8)
-        z = vqvae.quantizer.get_codebook_entry(indices.view(-1))
-        z = z.view(-1, *latent_shape)
-        recon = vqvae.decoder(z)
+        recon = vqvae.decode_from_indices(indices, (vqvae.latent_dim, 8, 8))
 
     img = recon[0].permute(1, 2, 0).cpu().numpy()
     img = (img * 255).clip(0, 255).astype(np.uint8)

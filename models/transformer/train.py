@@ -13,10 +13,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from datasets import load_dataset
-from huggingface_hub import HfApi, login
-from tqdm import tqdm
-from PIL import Image
 import numpy as np
+from PIL import Image
+from huggingface_hub import HfApi
+from tqdm import tqdm
 
 from models.vqvae.model import VQVAE
 from models.transformer.model import SpriteTransformer
@@ -127,9 +127,6 @@ def main():
         start_epoch = ckpt["epoch"] + 1
         print(f"Resumed from epoch {start_epoch}")
 
-    if args.hf_repo and args.hf_token:
-        login(token=args.hf_token)
-
     checkpoint_dir = Path(args.checkpoint_dir)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -173,9 +170,19 @@ def main():
         }, ckpt_path)
 
         if args.hf_repo and args.hf_token and (epoch + 1) % 10 == 0:
-            model.push_to_hub(
+            api = HfApi()
+            api.upload_file(
+                path_or_fileobj=str(ckpt_path),
+                path_in_repo=f"transformer_epoch_{epoch+1:03d}.pt",
                 repo_id=args.hf_repo,
-                commit_message=f"Transformer checkpoint epoch {epoch+1}",
+                repo_type="model",
+                token=args.hf_token,
+            )
+            api.upload_file(
+                path_or_fileobj=str(ckpt_path),
+                path_in_repo="transformer_latest.pt",
+                repo_id=args.hf_repo,
+                repo_type="model",
                 token=args.hf_token,
             )
 

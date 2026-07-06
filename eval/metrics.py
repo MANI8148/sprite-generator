@@ -11,8 +11,6 @@ import torch
 import numpy as np
 from PIL import Image
 from datasets import load_dataset
-from huggingface_hub import hf_hub_download
-
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from models.vqvae.model import VQVAE
 from models.transformer.model import SpriteTransformer
@@ -40,28 +38,18 @@ def palette_adherence_rate(img: Image.Image, palette: list) -> float:
 
 
 def grid_alignment_check(img: Image.Image, grid_size: int = 32) -> float:
-    """Check that sprite is aligned to pixel grid (no sub-pixel blur)."""
     arr = np.array(img)
     if arr.shape[2] == 4:
         alpha = arr[:, :, 3]
     else:
         alpha = np.ones((arr.shape[0], arr.shape[1])) * 255
 
-    # Check for smooth (non-binary) alpha edges
-    edge_pixels = 0
-    smooth_pixels = 0
+    total_pixels = (alpha > 0).sum()
+    if total_pixels == 0:
+        return 1.0
 
-    for y in range(1, arr.shape[0] - 1):
-        for x in range(1, arr.shape[0] - 1):
-            if alpha[y, x] > 0 and alpha[y, x] < 255:
-                edge_pixels += 1
-                if alpha[y, x] > 0:
-                    smooth_pixels += 1
-
-    if edge_pixels == 0:
-        return 1.0  # perfectly hard edges
-
-    return 1.0 - (smooth_pixels / edge_pixels)
+    smooth_pixels = ((alpha > 0) & (alpha < 255)).sum()
+    return 1.0 - (smooth_pixels / total_pixels)
 
 
 def compute_reconstruction_loss(vqvae, dataloader, device) -> float:

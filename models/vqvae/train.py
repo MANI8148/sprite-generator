@@ -174,7 +174,6 @@ def main():
 
         # Push to HF Hub
         if args.hf_repo and args.hf_token:
-            from huggingface_hub import HfApi
             api = HfApi()
             api.upload_file(
                 path_or_fileobj=str(ckpt_path),
