@@ -96,7 +96,7 @@ def main():
         num_embeddings=args.num_embeddings,
     ).to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
     start_epoch = 0
     global_step = 0
 
@@ -132,6 +132,7 @@ def main():
             output = model(batch)
             loss = output["loss"]
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
             total_loss += output["loss"].item()

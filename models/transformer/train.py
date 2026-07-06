@@ -85,8 +85,11 @@ def main():
     print(f"Device: {device}")
 
     # Load VQ-VAE
-    vqvae = VQVAE().to(device)
     vqvae_checkpoint = torch.load(args.vqvae_checkpoint, map_location=device)
+    num_emb = vqvae_checkpoint.get("config", {}).get("num_embeddings")
+    if num_emb is None:
+        num_emb = vqvae_checkpoint["model_state"]["quantizer.embedding.weight"].size(0)
+    vqvae = VQVAE(num_embeddings=num_emb).to(device)
     vqvae.load_state_dict(vqvae_checkpoint["model_state"])
     vqvae.eval()
     print("VQ-VAE loaded")
