@@ -20,8 +20,16 @@ jobs:
           pip install -q -r requirements.txt
           pip install -q requests imagehash torchvision
 
-      - name: Scrape sources
+      - name: Scrape Kenney.nl
         run: python data/scripts/scrape_sources.py --output data/raw
+
+      - name: Scrape OpenGameArt.org (CC0)
+        run: python data/scripts/scrape_oga.py --output data/raw --max-packs 50
+        continue-on-error: true
+
+      - name: Scrape Itch.io (CC0 bundles)
+        run: python data/scripts/scrape_itchio.py --output data/raw
+        continue-on-error: true
 
       - name: Clean and normalize
         run: |
@@ -36,7 +44,7 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
-      - name: Augment dataset
+      - name: Augment dataset (4x)
         run: |
           python data/scripts/augment_dataset.py \
             --input data/processed --output data/augmented \
