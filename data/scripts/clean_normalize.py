@@ -64,6 +64,8 @@ def find_content_bbox(img: Image.Image) -> tuple:
 
 
 def center_on_canvas(img: Image.Image, canvas_size: int = 32) -> Image.Image:
+    if img.mode != "RGBA":
+        img = img.convert("RGBA")
     bbox = find_content_bbox(img)
     sprite = img.crop(bbox)
 
