@@ -1,5 +1,6 @@
 """
 Upload cleaned sprite dataset to HuggingFace Datasets with versioning.
+Handles augmented datasets with flip/translation/jitter metadata.
 """
 import os
 import sys
@@ -10,7 +11,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 from datasets import Dataset, Features, Image as HFImage, Value
-from huggingface_hub import HfApi, login
+from huggingface_hub import HfApi
 
 
 def load_metadata(metadata_path: Path) -> list:
@@ -55,24 +56,31 @@ def main():
     classes = []
     actions = []
     directions = []
+    augmented_list = []
+    flipped_list = []
+    source_ids = []
 
     for entry in metadata:
         img_path = input_dir / entry["filename"]
         if not img_path.exists():
             continue
-        # Load as RGBA PIL
         img = Image.open(img_path).convert("RGBA")
         images.append(img)
         classes.append(entry.get("class", "unknown"))
         actions.append(entry.get("action", "idle"))
         directions.append(entry.get("direction", "front"))
+        augmented_list.append(entry.get("augmented", False))
+        flipped_list.append(entry.get("flipped", False))
+        source_ids.append(entry.get("source_id", entry.get("id", 0)))
 
-    # Create HF Dataset
     data = {
         "image": images,
         "class": classes,
         "action": actions,
         "direction": directions,
+        "augmented": augmented_list,
+        "flipped": flipped_list,
+        "source_id": source_ids,
     }
 
     features = Features({
@@ -80,14 +88,15 @@ def main():
         "class": Value("string"),
         "action": Value("string"),
         "direction": Value("string"),
+        "augmented": Value("bool"),
+        "flipped": Value("bool"),
+        "source_id": Value("int64"),
     })
 
     dataset = Dataset.from_dict(data, features=features)
 
     # Push to HF Hub
-    login(token=args.token)
-    api = HfApi()
-
+    api = HfApi(token=args.token)
     dataset.push_to_hub(
         args.repo,
         split=args.split,
@@ -97,7 +106,7 @@ def main():
 
     print(f"Pushed {len(dataset)} sprites to {args.repo}")
 
-    # Also push palette as a dataset card
+    # Push palette as a dataset card
     if palette:
         card_content = f"""---
 license: cc0-1.0
@@ -112,6 +121,12 @@ dataset_info:
     dtype: string
   - name: direction
     dtype: string
+  - name: augmented
+    dtype: bool
+  - name: flipped
+    dtype: bool
+  - name: source_id
+    dtype: int64
   splits:
   - name: train
     num_examples: {len(dataset)}
@@ -123,6 +138,7 @@ Global palette ({len(palette)} colors):
 {palette}
 
 Generated from Kenney.nl CC0 sprite packs.
+Augmented variants include: color jitter, random translation, label-aware flips.
 """
         api.upload_file(
             path_or_fileobj=card_content.encode(),

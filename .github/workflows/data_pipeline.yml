@@ -17,8 +17,8 @@ jobs:
 
       - name: Install deps
         run: |
-          pip install -r requirements.txt
-          pip install requests imagehash
+          pip install -q -r requirements.txt
+          pip install -q requests imagehash torchvision
 
       - name: Scrape sources
         run: python data/scripts/scrape_sources.py --output data/raw
@@ -36,9 +36,15 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
+      - name: Augment dataset
+        run: |
+          python data/scripts/augment_dataset.py \
+            --input data/processed --output data/augmented \
+            --copies 4
+
       - name: Push to HF Datasets
         run: |
           python data/scripts/push_to_hf.py \
-            --input data/processed \
+            --input data/augmented \
             --repo ${{ vars.HF_DATASET_REPO || 'darklord8777/sprites' }} \
             --token ${{ secrets.HF_TOKEN }}
