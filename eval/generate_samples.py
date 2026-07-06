@@ -70,7 +70,7 @@ def generate_grid(vqvae, transformer, device, grid_size=(4, 4), output_path="sam
 
         recon = vqvae.decode_from_indices(indices, (vqvae.latent_dim, 8, 8))
 
-        img_arr = recon[0].permute(1, 2, 0).cpu().numpy()
+        img_arr = recon[0].permute(1, 2, 0).cpu().detach().numpy()
         img_arr = (img_arr * 255).clip(0, 255).astype(np.uint8)
         img = Image.fromarray(img_arr, "RGBA")
 

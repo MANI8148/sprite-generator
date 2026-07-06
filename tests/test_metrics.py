@@ -1,8 +1,11 @@
 import numpy as np
 from PIL import Image
 import pytest
+import torch
+from torch.utils.data import DataLoader, TensorDataset
 
-from eval.metrics import palette_adherence_rate, grid_alignment_check
+from eval.metrics import palette_adherence_rate, grid_alignment_check, compute_reconstruction_loss
+from models.vqvae.model import VQVAE
 
 
 class TestPaletteAdherenceRate:
@@ -86,3 +89,33 @@ class TestGridAlignmentCheck:
         img = Image.fromarray(arr, "RGB")
         score = grid_alignment_check(img, 32)
         assert score == 1.0
+
+
+class TestComputeReconstructionLoss:
+    def _make_loader(self, data_tensor, batch_size=2):
+        ds = torch.utils.data.TensorDataset(data_tensor)
+        orig_fn = torch.utils.data.dataloader.default_collate
+        return DataLoader(ds, batch_size=batch_size, collate_fn=lambda b: orig_fn(b)[0])
+
+    def test_returns_float(self):
+        model = VQVAE(in_channels=4, hidden_dim=16, latent_dim=8, num_embeddings=16)
+        data = torch.randn(4, 4, 32, 32)
+        dataloader = self._make_loader(data)
+        loss = compute_reconstruction_loss(model, dataloader, "cpu")
+        assert isinstance(loss, float)
+
+    def test_non_negative(self):
+        model = VQVAE(in_channels=4, hidden_dim=16, latent_dim=8, num_embeddings=16)
+        data = torch.randn(4, 4, 32, 32)
+        dataloader = self._make_loader(data)
+        loss = compute_reconstruction_loss(model, dataloader, "cpu")
+        assert loss >= 0.0
+
+    def test_identical_inputs_produce_same_loss(self):
+        model = VQVAE(in_channels=4, hidden_dim=16, latent_dim=8, num_embeddings=16)
+        model.eval()
+        data = torch.ones(2, 4, 32, 32)
+        dataloader = self._make_loader(data)
+        loss1 = compute_reconstruction_loss(model, dataloader, "cpu")
+        loss2 = compute_reconstruction_loss(model, dataloader, "cpu")
+        assert loss1 == pytest.approx(loss2, abs=1e-6)
