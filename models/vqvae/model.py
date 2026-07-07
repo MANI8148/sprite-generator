@@ -60,14 +60,29 @@ class Decoder(nn.Module):
 
 
 class VectorQuantizer(nn.Module):
-    def __init__(self, num_embeddings: int = 256, embedding_dim: int = 64, commitment_cost: float = 0.25):
+    def __init__(
+        self,
+        num_embeddings: int = 256,
+        embedding_dim: int = 64,
+        commitment_cost: float = 0.25,
+        decay: float = 0.99,
+        epsilon: float = 1e-5,
+    ):
         super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.commitment_cost = commitment_cost
+        self.decay = decay
+        self.epsilon = epsilon
 
         self.embedding = nn.Embedding(num_embeddings, embedding_dim)
         self.embedding.weight.data.uniform_(-1.0 / num_embeddings, 1.0 / num_embeddings)
+
+        register_buffer = lambda name, shape: self.register_buffer(
+            name, torch.zeros(shape)
+        )
+        register_buffer("ema_count", (num_embeddings,))
+        register_buffer("ema_sum", (embedding_dim, num_embeddings))
 
     def forward(self, z: torch.Tensor) -> tuple:
         z_flat = z.permute(0, 2, 3, 1).contiguous().view(-1, self.embedding_dim)
@@ -89,8 +104,35 @@ class VectorQuantizer(nn.Module):
 
         return quantized, vq_loss, encoding_indices
 
+    def ema_update(self, z: torch.Tensor, encoding_indices: torch.Tensor):
+        z_flat = z.permute(0, 2, 3, 1).contiguous().view(-1, self.embedding_dim)
+        encoding_indices_flat = encoding_indices.view(-1)
+
+        with torch.no_grad():
+            encodings = F.one_hot(encoding_indices_flat, self.num_embeddings).float()
+            batch_count = encodings.sum(dim=0)
+            batch_sum = z_flat.t() @ encodings
+
+            if self.training:
+                self.ema_count.data = self.decay * self.ema_count + (1 - self.decay) * batch_count
+                self.ema_sum.data = self.decay * self.ema_sum + (1 - self.decay) * batch_sum
+
+                count = self.ema_count.clone()
+                n = count.sum()
+                count = ((count + self.epsilon) / (n + self.epsilon * self.num_embeddings)) * n
+                updated_embedding = (self.ema_sum / count.unsqueeze(0)).t()
+                updated_embedding[count == 0] = self.embedding.weight.data[count == 0]
+                self.embedding.weight.data.copy_(updated_embedding)
+
     def get_codebook_entry(self, indices: torch.Tensor) -> torch.Tensor:
         return self.embedding(indices)
+
+    def perplexity(self, encoding_indices: torch.Tensor) -> torch.Tensor:
+        indices_flat = encoding_indices.view(-1)
+        counts = torch.bincount(indices_flat, minlength=self.num_embeddings).float()
+        probs = counts / counts.sum()
+        entropy = -torch.sum(probs * torch.log(probs + self.epsilon))
+        return torch.exp(entropy)
 
 
 class VQVAE(nn.Module):
@@ -101,14 +143,16 @@ class VQVAE(nn.Module):
         latent_dim: int = 64,
         num_embeddings: int = 256,
         commitment_cost: float = 0.25,
+        decay: float = 0.99,
+        epsilon: float = 1e-5,
     ):
         super().__init__()
         self.encoder = Encoder(in_channels, hidden_dim, latent_dim)
-        self.quantizer = VectorQuantizer(num_embeddings, latent_dim, commitment_cost)
+        self.quantizer = VectorQuantizer(num_embeddings, latent_dim, commitment_cost, decay, epsilon)
         self.decoder = Decoder(in_channels, hidden_dim, latent_dim)
         self.latent_dim = latent_dim
 
-    def forward(self, x: torch.Tensor) -> tuple:
+    def forward(self, x: torch.Tensor) -> dict:
         z = self.encoder(x)
         quantized, vq_loss, indices = self.quantizer(z)
         recon = self.decoder(quantized)
@@ -132,3 +176,13 @@ class VQVAE(nn.Module):
         z = self.quantizer.get_codebook_entry(indices)
         z = z.view(-1, *latent_shape)
         return self.decoder(z)
+
+    def ema_update(self, x: torch.Tensor):
+        z = self.encoder(x)
+        _, _, indices = self.quantizer(z)
+        self.quantizer.ema_update(z, indices)
+
+    def perplexity(self, x: torch.Tensor) -> torch.Tensor:
+        z = self.encoder(x)
+        _, _, indices = self.quantizer(z)
+        return self.quantizer.perplexity(indices)

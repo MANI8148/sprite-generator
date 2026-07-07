@@ -150,3 +150,68 @@ class TestTrainingSteps:
         output["loss"].backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
+
+    def test_training_with_lr_scheduler(self):
+        model = VQVAE(in_channels=4, hidden_dim=32, latent_dim=16, num_embeddings=32)
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+        x = torch.ones(2, 4, 32, 32)
+
+        initial_lr = optimizer.param_groups[0]["lr"]
+        for _ in range(5):
+            optimizer.zero_grad()
+            loss = model(x)["loss"]
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+
+        assert optimizer.param_groups[0]["lr"] < initial_lr, "LR should decrease after scheduler steps"
+
+    def test_training_with_ema(self):
+        model = VQVAE(in_channels=4, hidden_dim=32, latent_dim=16, num_embeddings=32, commitment_cost=0.1)
+        model.train()
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        x = torch.ones(2, 4, 32, 32)
+
+        output = model(x)
+        loss = output["loss"]
+        loss.backward()
+        optimizer.step()
+        model.ema_update(x)
+
+        assert model.quantizer.ema_count.sum().item() > 0, "EMA counts should be updated"
+
+    def test_training_with_ema_and_scheduler(self):
+        model = VQVAE(in_channels=4, hidden_dim=32, latent_dim=16, num_embeddings=32, commitment_cost=0.1)
+        model.train()
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+        x = torch.ones(2, 4, 32, 32)
+
+        initial_loss = model(x)["loss"].item()
+        for _ in range(20):
+            optimizer.zero_grad()
+            output = model(x)
+            output["loss"].backward()
+            optimizer.step()
+            model.ema_update(x)
+            scheduler.step()
+
+        final_loss = model(x)["loss"].item()
+        assert final_loss < initial_loss, f"Loss did not decrease with EMA: {initial_loss:.4f} -> {final_loss:.4f}"
+
+    def test_checkpoint_with_scheduler_state(self, tmp_path):
+        model = VQVAE()
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+        ckpt_path = tmp_path / "scheduler_ckpt.pt"
+        torch.save({
+            "model_state": model.state_dict(),
+            "optimizer_state": optimizer.state_dict(),
+            "scheduler_state": scheduler.state_dict(),
+            "epoch": 5,
+            "config": {"use_ema": True, "decay": 0.99},
+        }, ckpt_path)
+        loaded = torch.load(ckpt_path)
+        assert "scheduler_state" in loaded
+        assert loaded["config"]["use_ema"] is True

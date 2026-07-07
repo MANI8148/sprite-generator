@@ -1,7 +1,7 @@
 # Roadmap
 
 1. Setup project structure and data pipeline ✓
-2. Build VQ-VAE model and training loop
+2. Build VQ-VAE model and training loop ✓
 3. Build Transformer prior with conditioning
 4. Train on Kaggle and push checkpoints
 5. Write evaluation metrics and sample generation

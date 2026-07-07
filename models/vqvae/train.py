@@ -6,6 +6,7 @@ import os
 import sys
 import argparse
 import json
+import math
 from pathlib import Path
 
 import torch
@@ -73,6 +74,9 @@ def main():
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--warmup-epochs", type=int, default=5)
+    parser.add_argument("--use-ema", action="store_true", help="Use EMA codebook updates")
+    parser.add_argument("--decay", type=float, default=0.99, help="EMA decay")
     parser.add_argument("--checkpoint-dir", default="checkpoints/vqvae")
     parser.add_argument("--hf-repo", default=None, help="HF model repo to push to")
     parser.add_argument("--hf-token", default=None)
@@ -95,9 +99,18 @@ def main():
         hidden_dim=args.hidden_dim,
         latent_dim=args.latent_dim,
         num_embeddings=args.num_embeddings,
+        decay=args.decay,
+        commitment_cost=0.1 if args.use_ema else 0.25,
     ).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
+
+    def warmup_cosine(epoch):
+        if epoch < args.warmup_epochs:
+            return (epoch + 1) / args.warmup_epochs
+        return 0.5 * (1 + math.cos((epoch - args.warmup_epochs) / (args.epochs - args.warmup_epochs) * math.pi))
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, warmup_cosine)
+
     start_epoch = 0
     global_step = 0
 
@@ -124,6 +137,7 @@ def main():
         total_loss = 0
         total_recon_loss = 0
         total_vq_loss = 0
+        total_perplexity = 0
 
         pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{args.epochs}")
         for batch in pbar:
@@ -136,22 +150,32 @@ def main():
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
+            if args.use_ema:
+                model.ema_update(batch)
+
+            perplexity_val = model.perplexity(batch).item()
+
             total_loss += output["loss"].item()
             total_recon_loss += output["recon_loss"].item()
             total_vq_loss += output["vq_loss"].item()
+            total_perplexity += perplexity_val
             global_step += 1
 
             pbar.set_postfix({
                 "loss": output["loss"].item(),
                 "recon": output["recon_loss"].item(),
                 "vq": output["vq_loss"].item(),
+                "ppl": perplexity_val,
             })
+
+        scheduler.step()
 
         avg_loss = total_loss / len(dataloader)
         avg_recon = total_recon_loss / len(dataloader)
         avg_vq = total_vq_loss / len(dataloader)
+        avg_perplexity = total_perplexity / len(dataloader)
 
-        print(f"Epoch {epoch+1}: loss={avg_loss:.6f}, recon={avg_recon:.6f}, vq={avg_vq:.6f}")
+        print(f"Epoch {epoch+1}: loss={avg_loss:.6f}, recon={avg_recon:.6f}, vq={avg_vq:.6f}, ppl={avg_perplexity:.2f}")
 
         # Save checkpoint
         ckpt_path = checkpoint_dir / f"vqvae_epoch_{epoch+1:03d}.pt"
@@ -160,12 +184,16 @@ def main():
             "global_step": global_step,
             "model_state": model.state_dict(),
             "optimizer_state": optimizer.state_dict(),
+            "scheduler_state": scheduler.state_dict(),
             "loss": avg_loss,
+            "perplexity": avg_perplexity,
             "config": {
                 "image_size": args.image_size,
                 "hidden_dim": args.hidden_dim,
                 "latent_dim": args.latent_dim,
                 "num_embeddings": args.num_embeddings,
+                "use_ema": args.use_ema,
+                "decay": args.decay,
             },
         }, ckpt_path)
 

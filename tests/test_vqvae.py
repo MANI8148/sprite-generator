@@ -76,6 +76,45 @@ class TestVectorQuantizer:
         _, vq_loss, _ = quantizer(z)
         assert vq_loss.item() >= 0
 
+    def test_ema_update_does_not_crash(self):
+        quantizer = VectorQuantizer(num_embeddings=32, embedding_dim=16)
+        z = torch.randn(1, 16, 4, 4)
+        _, _, indices = quantizer(z)
+        quantizer.ema_update(z, indices)
+        assert quantizer.ema_count.shape[0] == 32
+        assert quantizer.ema_sum.shape[1] == 32
+
+    def test_ema_update_changes_codebook(self):
+        quantizer = VectorQuantizer(num_embeddings=32, embedding_dim=16, decay=0.5)
+        z = torch.randn(2, 16, 4, 4)
+        _, _, indices = quantizer(z)
+        old_weight = quantizer.embedding.weight.data.clone()
+        quantizer.ema_update(z, indices)
+        assert not torch.equal(quantizer.embedding.weight.data, old_weight), "EMA did not update codebook"
+
+    def test_ema_training_mode_only_updates(self):
+        quantizer = VectorQuantizer(num_embeddings=32, embedding_dim=16)
+        z = torch.randn(1, 16, 4, 4)
+        _, _, indices = quantizer(z)
+        old_count = quantizer.ema_count.clone()
+        old_sum = quantizer.ema_sum.clone()
+        quantizer.eval()
+        quantizer.ema_update(z, indices)
+        assert torch.equal(quantizer.ema_count, old_count), "EMA should not update in eval mode"
+        assert torch.equal(quantizer.ema_sum, old_sum), "EMA should not update in eval mode"
+
+    def test_perplexity_in_range(self):
+        quantizer = VectorQuantizer(num_embeddings=256, embedding_dim=64)
+        indices = torch.randint(0, 256, (2, 64))
+        ppl = quantizer.perplexity(indices)
+        assert 1.0 <= ppl <= 256.0
+
+    def test_perplexity_one_for_single_code(self):
+        quantizer = VectorQuantizer(num_embeddings=256, embedding_dim=64)
+        indices = torch.zeros(2, 64, dtype=torch.long)
+        ppl = quantizer.perplexity(indices)
+        assert ppl.item() == pytest.approx(1.0, abs=1e-4)
+
 
 class TestVQVAE:
     def test_forward_shapes(self):
@@ -115,6 +154,20 @@ class TestVQVAE:
         indices = model.encode_to_indices(x)
         recon = model.decode_from_indices(indices, (64, 8, 8))
         assert recon.shape == x.shape
+
+    def test_ema_update_on_vqvae(self):
+        model = VQVAE(in_channels=4, hidden_dim=32, latent_dim=16, num_embeddings=32)
+        x = torch.randn(2, 4, 32, 32)
+        model.train()
+        old_weight = model.quantizer.embedding.weight.data.clone()
+        model.ema_update(x)
+        assert not torch.equal(model.quantizer.embedding.weight.data, old_weight)
+
+    def test_perplexity_on_vqvae(self):
+        model = VQVAE()
+        x = torch.randn(2, 4, 32, 32)
+        ppl = model.perplexity(x)
+        assert 1.0 <= ppl <= model.quantizer.num_embeddings
 
     def test_gradient_flow(self):
         model = VQVAE()
