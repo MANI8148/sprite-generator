@@ -25,12 +25,23 @@ def load_models(hf_repo: str, device: str):
     vqvae.load_state_dict(vqvae_ckpt["model_state"])
     vqvae.eval()
 
+    t_ckpt = torch.load(hf_hub_download(hf_repo, "transformer_latest.pt"), map_location=device)
+    cfg = t_ckpt.get("config", {})
+    sd = t_ckpt["model_state"]
+    d_model = cfg.get("d_model", sd["ln_f.weight"].size(0))
+    n_layers = cfg.get("n_layers", sum(1 for k in sd if k.startswith("blocks.") and k.endswith(".ln1.weight")))
+    n_heads = cfg.get("n_heads", 8)
+    max_seq_len = sd["pos_embedding"].size(1)
+
     transformer = SpriteTransformer(
-        vocab_size=vqvae.quantizer.num_embeddings,
+        vocab_size=sd["head.weight"].size(0),
         condition_vocab_size=64,
+        d_model=d_model,
+        n_layers=n_layers,
+        n_heads=n_heads,
+        max_seq_len=max_seq_len,
     ).to(device)
-    ckpt = torch.load(hf_hub_download(hf_repo, "transformer_latest.pt"), map_location=device)
-    transformer.load_state_dict(ckpt["model_state"])
+    transformer.load_state_dict(sd)
     transformer.eval()
 
     return vqvae, transformer
