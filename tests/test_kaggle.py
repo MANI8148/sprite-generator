@@ -1,12 +1,14 @@
 """
 Tests for Kaggle training infrastructure (roadmap item #4).
-Validates kernel metadata, notebook structure, and training imports.
+Validates kernel metadata, notebook structure, training imports,
+and the end-to-end VQ-VAE → Transformer training pipeline.
 """
 import json
 import importlib
 from pathlib import Path
 
 import pytest
+import torch
 
 KAGGLE_DIR = Path(__file__).parent.parent / "kaggle"
 
@@ -179,3 +181,238 @@ class TestKaggleWorkflowIntegration:
 
         from models.transformer.train import main as transformer_main
         assert callable(transformer_main)
+
+
+class TestEndToEndTrainingPipeline:
+    """
+    Integration test for the full VQ-VAE → encode tokens → Transformer pipeline
+    that runs on Kaggle (kaggle_complete_train.ipynb steps 2-4).
+    Validates the complete training flow with synthetic data.
+    """
+
+    def test_vqvae_trains_and_produces_valid_checkpoint(self, tmp_path):
+        from models.vqvae.model import VQVAE
+
+        model = VQVAE(in_channels=4, hidden_dim=32, latent_dim=16, num_embeddings=32)
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        x = torch.randn(4, 4, 32, 32)
+
+        model.train()
+        for _ in range(10):
+            optimizer.zero_grad()
+            out = model(x)
+            out["loss"].backward()
+            optimizer.step()
+
+        ckpt = {
+            "epoch": 9,
+            "model_state": model.state_dict(),
+            "optimizer_state": optimizer.state_dict(),
+            "loss": out["loss"].item(),
+            "config": {"hidden_dim": 32, "latent_dim": 16, "num_embeddings": 32},
+        }
+        ckpt_path = tmp_path / "vqvae_test.pt"
+        torch.save(ckpt, ckpt_path)
+
+        loaded = torch.load(ckpt_path)
+        assert all(k in loaded for k in ("epoch", "model_state", "optimizer_state", "loss", "config"))
+        assert loaded["config"]["num_embeddings"] == 32
+
+        model2 = VQVAE(in_channels=4, hidden_dim=32, latent_dim=16, num_embeddings=32)
+        model2.load_state_dict(loaded["model_state"])
+        model2.eval()
+        with torch.no_grad():
+            out2 = model2(x)
+        assert out2["recon"].shape == (4, 4, 32, 32)
+
+    def test_vqvae_encodes_to_tokens(self):
+        from models.vqvae.model import VQVAE
+
+        model = VQVAE(in_channels=4, hidden_dim=32, latent_dim=16, num_embeddings=64)
+        x = torch.randn(2, 4, 32, 32)
+        indices = model.encode_to_indices(x)
+        assert indices.shape == (2, 64)
+        assert indices.dtype == torch.long
+        assert indices.min() >= 0
+        assert indices.max() < 64
+
+    def test_vqvae_decode_from_tokens(self):
+        from models.vqvae.model import VQVAE
+
+        model = VQVAE(in_channels=4, hidden_dim=32, latent_dim=16, num_embeddings=64)
+        indices = torch.randint(0, 64, (2, 8, 8))
+        decoded = model.decode_from_indices(indices.view(2, -1), (16, 8, 8))
+        assert decoded.shape == (2, 4, 32, 32)
+
+    def test_transformer_trains_on_vqvae_tokens(self):
+        from models.vqvae.model import VQVAE
+        from models.transformer.model import SpriteTransformer
+
+        vqvae = VQVAE(in_channels=4, hidden_dim=32, latent_dim=16, num_embeddings=64)
+        B = 4
+        x = torch.randn(B, 4, 32, 32)
+        with torch.no_grad():
+            tokens = vqvae.encode_to_indices(x)
+
+        num_emb = 64
+        transformer = SpriteTransformer(
+            vocab_size=num_emb, condition_vocab_size=64,
+            d_model=32, n_layers=2, n_heads=2, max_seq_len=65,
+        )
+        class_ids = torch.randint(0, 20, (B,))
+        action_ids = torch.randint(0, 14, (B,))
+        direction_ids = torch.randint(0, 8, (B,))
+
+        logits = transformer(tokens, class_ids, action_ids, direction_ids)
+        assert logits.shape == (B, 64, num_emb)
+
+        loss = torch.nn.functional.cross_entropy(logits.view(-1, num_emb), tokens.view(-1))
+        loss.backward()
+
+        optimizer = torch.optim.Adam(transformer.parameters(), lr=1e-3)
+        initial_loss = loss.item()
+        for _ in range(30):
+            optimizer.zero_grad()
+            logits = transformer(tokens, class_ids, action_ids, direction_ids)
+            loss = torch.nn.functional.cross_entropy(logits.view(-1, num_emb), tokens.view(-1))
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(transformer.parameters(), 1.0)
+            optimizer.step()
+
+        with torch.no_grad():
+            final_logits = transformer(tokens, class_ids, action_ids, direction_ids)
+            final_loss = torch.nn.functional.cross_entropy(
+                final_logits.view(-1, num_emb), tokens.view(-1)
+            ).item()
+        assert final_loss < initial_loss, (
+            f"Transformer loss did not decrease: {initial_loss:.4f} -> {final_loss:.4f}"
+        )
+
+    def test_transformer_generates_and_vqvae_decodes(self):
+        from models.vqvae.model import VQVAE
+        from models.transformer.model import SpriteTransformer
+
+        num_emb = 64
+        vqvae = VQVAE(in_channels=4, hidden_dim=32, latent_dim=16, num_embeddings=num_emb)
+        transformer = SpriteTransformer(
+            vocab_size=num_emb, condition_vocab_size=64,
+            d_model=32, n_layers=2, n_heads=2, max_seq_len=65,
+        )
+
+        class_id = torch.tensor([5])
+        action_id = torch.tensor([3])
+        direction_id = torch.tensor([1])
+        with torch.no_grad():
+            generated = transformer.generate(
+                class_id, action_id, direction_id, max_tokens=64, temperature=1.0, top_k=10
+            )
+        assert generated.shape == (1, 64)
+        assert generated.dtype == torch.long
+        assert generated.min() >= 0
+        assert generated.max() < num_emb
+
+        decoded = vqvae.decode_from_indices(generated.view(1, -1), (16, 8, 8))
+        assert decoded.shape == (1, 4, 32, 32)
+
+    def test_checkpoint_format_matches_kaggle_notebook(self, tmp_path):
+        from models.vqvae.model import VQVAE
+        from models.transformer.model import SpriteTransformer
+
+        vqvae = VQVAE(in_channels=4, hidden_dim=32, latent_dim=16, num_embeddings=64)
+        vqvae_ckpt = {
+            "epoch": 50,
+            "model_state": vqvae.state_dict(),
+            "optimizer_state": torch.optim.Adam(vqvae.parameters(), lr=1e-3).state_dict(),
+            "loss": 0.05,
+            "config": {"hidden_dim": 128, "latent_dim": 64, "num_embeddings": 512},
+        }
+        vqvae_path = tmp_path / "vqvae_latest.pt"
+        torch.save(vqvae_ckpt, vqvae_path)
+        loaded_v = torch.load(vqvae_path)
+        assert loaded_v["epoch"] == 50
+        assert loaded_v["config"]["num_embeddings"] == 512
+
+        transformer = SpriteTransformer(
+            vocab_size=64, condition_vocab_size=64,
+            d_model=32, n_layers=2, n_heads=2, max_seq_len=65,
+        )
+        transformer_ckpt = {
+            "epoch": 100,
+            "model_state": transformer.state_dict(),
+            "optimizer_state": torch.optim.Adam(transformer.parameters(), lr=1e-3).state_dict(),
+            "loss": 0.01,
+            "config": {"d_model": 512, "n_layers": 8, "n_heads": 8, "max_seq_len": 65},
+        }
+        transformer_path = tmp_path / "transformer_latest.pt"
+        torch.save(transformer_ckpt, transformer_path)
+        loaded_t = torch.load(transformer_path)
+        assert loaded_t["epoch"] == 100
+        assert loaded_t["config"]["d_model"] == 512
+        assert loaded_t["config"]["n_layers"] == 8
+        assert loaded_t["config"]["n_heads"] == 8
+
+    def test_full_pipeline_synthetic_data(self, tmp_path):
+        from models.vqvae.model import VQVAE
+        from models.transformer.model import SpriteTransformer
+
+        num_emb = 64
+        B = 8
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        vqvae = VQVAE(in_channels=4, hidden_dim=32, latent_dim=16, num_embeddings=num_emb).to(device)
+        vqvae.train()
+        optimizer_v = torch.optim.Adam(vqvae.parameters(), lr=1e-3)
+        x = torch.randn(B * 4, 4, 32, 32).to(device)
+
+        for _ in range(15):
+            optimizer_v.zero_grad()
+            out = vqvae(x)
+            out["loss"].backward()
+            optimizer_v.step()
+        vqvae.eval()
+
+        with torch.no_grad():
+            tokens = vqvae.encode_to_indices(x)
+
+        transformer = SpriteTransformer(
+            vocab_size=num_emb, condition_vocab_size=64,
+            d_model=32, n_layers=2, n_heads=2, max_seq_len=(8 * 8) + 1,
+        ).to(device)
+        optimizer_t = torch.optim.Adam(transformer.parameters(), lr=1e-3)
+
+        seq_len = 8 * 8
+        class_ids = torch.randint(0, 20, (B * 4,), device=device)
+        action_ids = torch.randint(0, 14, (B * 4,), device=device)
+        direction_ids = torch.randint(0, 8, (B * 4,), device=device)
+
+        for _ in range(20):
+            optimizer_t.zero_grad()
+            logits = transformer(tokens, class_ids, action_ids, direction_ids)
+            loss = torch.nn.functional.cross_entropy(logits.view(-1, num_emb), tokens.reshape(-1))
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(transformer.parameters(), 1.0)
+            optimizer_t.step()
+
+        transformer.eval()
+        with torch.no_grad():
+            gen = transformer.generate(
+                class_ids[:1], action_ids[:1], direction_ids[:1],
+                max_tokens=seq_len, temperature=1.0, top_k=10,
+            )
+        assert gen.shape == (1, seq_len)
+
+        decoded = vqvae.decode_from_indices(gen.to(device), (16, 8, 8))
+        assert decoded.shape == (1, 4, 32, 32)
+
+        torch.save({
+            "epoch": 10, "model_state": vqvae.state_dict(),
+            "loss": out["loss"].item(),
+            "config": {"num_embeddings": num_emb},
+        }, tmp_path / "vqvae_final.pt")
+        torch.save({
+            "epoch": 10, "model_state": transformer.state_dict(),
+            "loss": loss.item(),
+            "config": {"d_model": 32},
+        }, tmp_path / "transformer_final.pt")
+        assert (tmp_path / "vqvae_final.pt").exists()
+        assert (tmp_path / "transformer_final.pt").exists()
