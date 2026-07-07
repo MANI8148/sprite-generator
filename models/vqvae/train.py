@@ -43,14 +43,15 @@ def save_reconstruction_grid(model, device, sample_batch, output_path, num_sampl
     """Save side-by-side comparison of original vs reconstructed."""
     model.eval()
     with torch.no_grad():
-        batch = sample_batch[:num_samples].to(device)
+        actual_num = min(num_samples, sample_batch.size(0))
+        batch = sample_batch[:actual_num].to(device)
         output = model(batch)
         recon = output["recon"].cpu()
 
     # Create comparison grid
     import numpy as np
     imgs = []
-    for i in range(num_samples):
+    for i in range(actual_num):
         orig = batch[i].cpu().permute(1, 2, 0).numpy()
         rec = recon[i].permute(1, 2, 0).numpy()
         combined = np.concatenate([orig, rec], axis=1)
