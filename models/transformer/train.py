@@ -5,6 +5,7 @@ Trains on VQ-VAE encoded token sequences from the dataset.
 import os
 import sys
 import argparse
+import math
 from pathlib import Path
 
 import torch
@@ -69,12 +70,14 @@ def main():
     parser = argparse.ArgumentParser(description="Train transformer prior")
     parser.add_argument("--dataset", required=True, help="HF Dataset path")
     parser.add_argument("--vqvae-checkpoint", required=True, help="Trained VQ-VAE checkpoint")
-    parser.add_argument("--d-model", type=int, default=256)
-    parser.add_argument("--n-layers", type=int, default=8)
-    parser.add_argument("--n-heads", type=int, default=4)
+    parser.add_argument("--d-model", type=int, default=512)
+    parser.add_argument("--n-layers", type=int, default=12)
+    parser.add_argument("--n-heads", type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--warmup-epochs", type=int, default=5)
+    parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--checkpoint-dir", default="checkpoints/transformer")
     parser.add_argument("--hf-repo", default=None, help="HF model repo")
     parser.add_argument("--hf-token", default=None)
@@ -119,8 +122,13 @@ def main():
         max_seq_len=max_seq_len + 1,
     ).to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+
+    def warmup_cosine(epoch):
+        if epoch < args.warmup_epochs:
+            return (epoch + 1) / args.warmup_epochs
+        return 0.5 * (1 + math.cos((epoch - args.warmup_epochs) / (args.epochs - args.warmup_epochs) * math.pi))
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, warmup_cosine)
     start_epoch = 0
 
     if args.resume:
