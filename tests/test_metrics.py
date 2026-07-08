@@ -8,7 +8,7 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from eval.metrics import palette_adherence_rate, grid_alignment_check, compute_reconstruction_loss
+from eval.metrics import palette_adherence_rate, grid_alignment_check, compute_reconstruction_loss, compute_diversity_score
 from models.vqvae.model import VQVAE
 
 
@@ -123,6 +123,57 @@ class TestComputeReconstructionLoss:
         loss1 = compute_reconstruction_loss(model, dataloader, "cpu")
         loss2 = compute_reconstruction_loss(model, dataloader, "cpu")
         assert loss1 == pytest.approx(loss2, abs=1e-6)
+
+
+class TestDiversityScore:
+    def test_identical_images_zero_diversity(self):
+        model = VQVAE(in_channels=4, hidden_dim=16, latent_dim=8, num_embeddings=16)
+        arr = np.zeros((32, 32, 4), dtype=np.uint8)
+        arr[:, :, :3] = [255, 0, 0]
+        arr[:, :, 3] = 255
+        img = Image.fromarray(arr, "RGBA")
+        score = compute_diversity_score([img, img], model, "cpu")
+        assert score == pytest.approx(0.0, abs=1e-4)
+
+    def test_different_images_positive_diversity(self):
+        model = VQVAE(in_channels=4, hidden_dim=16, latent_dim=8, num_embeddings=16)
+        arr1 = np.zeros((32, 32, 4), dtype=np.uint8)
+        arr1[:, :, :3] = [255, 0, 0]
+        arr1[:, :, 3] = 255
+        arr2 = np.zeros((32, 32, 4), dtype=np.uint8)
+        arr2[:, :, :3] = [0, 255, 0]
+        arr2[:, :, 3] = 255
+        img1 = Image.fromarray(arr1, "RGBA")
+        img2 = Image.fromarray(arr2, "RGBA")
+        score = compute_diversity_score([img1, img2], model, "cpu")
+        assert 0.0 <= score <= 1.0
+
+    def test_single_image_returns_zero(self):
+        model = VQVAE(in_channels=4, hidden_dim=16, latent_dim=8, num_embeddings=16)
+        arr = np.zeros((32, 32, 4), dtype=np.uint8)
+        arr[:, :, :3] = [255, 0, 0]
+        arr[:, :, 3] = 255
+        img = Image.fromarray(arr, "RGBA")
+        score = compute_diversity_score([img], model, "cpu")
+        assert score == 0.0
+
+    def test_empty_list_returns_zero(self):
+        model = VQVAE(in_channels=4, hidden_dim=16, latent_dim=8, num_embeddings=16)
+        score = compute_diversity_score([], model, "cpu")
+        assert score == 0.0
+
+    def test_diversity_increases_with_more_variation(self):
+        model = VQVAE(in_channels=4, hidden_dim=16, latent_dim=8, num_embeddings=64)
+        colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)]
+        imgs = []
+        for c in colors:
+            arr = np.zeros((32, 32, 4), dtype=np.uint8)
+            arr[:, :, :3] = c
+            arr[:, :, 3] = 255
+            imgs.append(Image.fromarray(arr, "RGBA"))
+
+        score = compute_diversity_score(imgs, model, "cpu")
+        assert score > 0.0
 
 
 class TestMainEntryPoint:

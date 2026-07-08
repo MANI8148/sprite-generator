@@ -52,6 +52,34 @@ def grid_alignment_check(img: Image.Image, grid_size: int = 32) -> float:
     return 1.0 - (smooth_pixels / total_pixels)
 
 
+def compute_diversity_score(images: list, vqvae, device) -> float:
+    """Compute average pairwise cosine distance between VQ-VAE latent codes.
+
+    Higher scores indicate more diverse generations.
+    """
+    vqvae.eval()
+    all_latents = []
+
+    with torch.no_grad():
+        for img in images:
+            arr = np.array(img.convert("RGBA").resize((32, 32)), dtype=np.float32) / 255.0
+            tensor = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0).to(device)
+            z = vqvae.encoder(tensor)
+            z_flat = z.view(z.size(0), -1)
+            all_latents.append(z_flat)
+
+    if len(all_latents) < 2:
+        return 0.0
+
+    all_latents = torch.cat(all_latents, dim=0)
+    norms = all_latents / (all_latents.norm(dim=1, keepdim=True) + 1e-8)
+    cos_sim = norms @ norms.t()
+    mask = torch.eye(len(images), device=device, dtype=torch.bool)
+    cos_sim = cos_sim[~mask].view(len(images), -1)
+    mean_cos = cos_sim.mean().item()
+    return 1.0 - mean_cos
+
+
 def compute_reconstruction_loss(vqvae, dataloader, device) -> float:
     """Compute average reconstruction MSE over a dataset."""
     vqvae.eval()
