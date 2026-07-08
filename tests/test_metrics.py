@@ -1,3 +1,7 @@
+import json
+import tempfile
+from pathlib import Path
+
 import numpy as np
 from PIL import Image
 import pytest
@@ -119,3 +123,126 @@ class TestComputeReconstructionLoss:
         loss1 = compute_reconstruction_loss(model, dataloader, "cpu")
         loss2 = compute_reconstruction_loss(model, dataloader, "cpu")
         assert loss1 == pytest.approx(loss2, abs=1e-6)
+
+
+class TestMainEntryPoint:
+    def test_main_runs_and_writes_output(self, monkeypatch, tmp_path):
+        from eval.metrics import main
+
+        output_path = tmp_path / "eval_results.json"
+        checkpoint_path = tmp_path / "vqvae.pt"
+        palette_path = tmp_path / "palette.json"
+
+        model = VQVAE(num_embeddings=16)
+        torch.save({
+            "model_state": model.state_dict(),
+            "config": {"num_embeddings": 16},
+        }, checkpoint_path)
+
+        palette = [[255, 0, 0], [0, 255, 0], [0, 0, 255]]
+        with open(palette_path, "w") as f:
+            json.dump(palette, f)
+
+        class FakeItem:
+            def __init__(self, idx=None):
+                self.idx = idx
+            def __getitem__(self, key):
+                arr = np.zeros((32, 32, 4), dtype=np.uint8)
+                arr[:, :, :3] = [255, 0, 0]
+                arr[:, :, 3] = 255
+                return Image.fromarray(arr, "RGBA")
+            @property
+            def image(self):
+                return self.__getitem__("image")
+
+        class FakeDataset:
+            def __init__(self, n):
+                self.n = n
+            def __len__(self):
+                return self.n
+            def __getitem__(self, idx):
+                return FakeItem(idx)
+            def __iter__(self):
+                for i in range(self.n):
+                    yield FakeItem(i)
+
+        monkeypatch.setattr(
+            "eval.metrics.load_dataset",
+            lambda path, split: FakeDataset(4),
+        )
+
+        test_args = [
+            "prog",
+            "--dataset", "fake/dataset",
+            "--vqvae-checkpoint", str(checkpoint_path),
+            "--palette", str(palette_path),
+            "--output", str(output_path),
+            "--num-samples", "4",
+        ]
+        monkeypatch.setattr("sys.argv", test_args)
+        main()
+
+        assert output_path.exists()
+        with open(output_path) as f:
+            results = json.load(f)
+
+        assert "palette_adherence_mean" in results
+        assert "grid_alignment_mean" in results
+        assert "reconstruction_loss" in results
+        assert results["num_samples"] == 4
+        assert results["palette_size"] == 3
+        assert isinstance(results["reconstruction_loss"], float)
+
+    def test_main_without_vqvae_skips_recon_loss(self, monkeypatch, tmp_path):
+        from eval.metrics import main
+
+        output_path = tmp_path / "eval_results.json"
+        palette_path = tmp_path / "palette.json"
+
+        palette = [[255, 0, 0], [0, 255, 0]]
+        with open(palette_path, "w") as f:
+            json.dump(palette, f)
+
+        class FakeItem:
+            def __init__(self, idx=None):
+                self.idx = idx
+            def __getitem__(self, key):
+                arr = np.zeros((32, 32, 4), dtype=np.uint8)
+                arr[:, :, :3] = [255, 0, 0]
+                arr[:, :, 3] = 255
+                return Image.fromarray(arr, "RGBA")
+            @property
+            def image(self):
+                return self.__getitem__("image")
+
+        class FakeDataset:
+            def __init__(self):
+                self.items = [FakeItem() for _ in range(2)]
+            def __len__(self):
+                return len(self.items)
+            def __getitem__(self, idx):
+                return self.items[idx]
+            def __iter__(self):
+                return iter(self.items)
+
+        monkeypatch.setattr(
+            "eval.metrics.load_dataset",
+            lambda path, split: FakeDataset(),
+        )
+
+        test_args = [
+            "prog",
+            "--dataset", "fake/dataset",
+            "--palette", str(palette_path),
+            "--output", str(output_path),
+            "--num-samples", "2",
+        ]
+        monkeypatch.setattr("sys.argv", test_args)
+        main()
+
+        with open(output_path) as f:
+            results = json.load(f)
+
+        assert results["reconstruction_loss"] is None
+        assert results["num_samples"] == 2
+        assert results["palette_size"] == 2

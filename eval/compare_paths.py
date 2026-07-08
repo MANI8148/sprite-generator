@@ -85,6 +85,7 @@ def main():
     parser.add_argument("--num-samples", type=int, default=8)
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--visualization", default="comparison_grid.png")
+    parser.add_argument("--palette", default=None, help="Path to palette JSON file")
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -94,6 +95,11 @@ def main():
         (255, 255, 255), (0, 0, 0), (128, 128, 128), (255, 128, 0),
         (128, 0, 128), (0, 128, 128), (128, 128, 0), (64, 64, 64),
     ]
+    palette_path = Path(args.palette) if args.palette else Path("data/processed/palette.json")
+    if palette_path.exists():
+        with open(palette_path) as f:
+            raw = json.load(f)
+            palette = [tuple(c) for c in raw] if isinstance(raw[0], list) else raw
 
     print("Loading VQ-VAE...")
     vqvae_ckpt = torch.load(args.vqvae_checkpoint, map_location=device)
