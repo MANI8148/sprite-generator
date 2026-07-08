@@ -92,8 +92,48 @@ def generate_sprite(
     return Image.fromarray(img, "RGBA")
 
 
+def generate_grid(
+    vqvae, transformer, device, rows=4, cols=4,
+    class_name="character", action="idle", direction="front",
+    temperature=1.0, top_k=40, top_p=0.9,
+) -> Image.Image:
+    total = rows * cols
+    sprite_size = 32
+    canvas = Image.new("RGBA", (cols * sprite_size, rows * sprite_size), (0, 0, 0, 0))
+
+    temps = [max(0.4, min(2.0, temperature * (0.6 + 0.4 * (i % cols) / max(cols - 1, 1)))) for i in range(total)]
+
+    for i in range(total):
+        cls = class_name
+        act = action
+        dire = direction
+
+        class_id = torch.tensor([encode_condition(cls, CLASS_VOCAB)]).to(device)
+        action_id = torch.tensor([encode_condition(act, ACTION_VOCAB)]).to(device)
+        direction_id = torch.tensor([encode_condition(dire, DIRECTION_VOCAB)]).to(device)
+
+        with torch.no_grad():
+            indices = transformer.generate(
+                class_id, action_id, direction_id,
+                max_tokens=64,
+                temperature=temps[i],
+                top_k=top_k,
+                top_p=top_p,
+            )
+
+        recon = vqvae.decode_from_indices(indices, (vqvae.latent_dim, 8, 8))
+        img_arr = recon[0].permute(1, 2, 0).cpu().detach().numpy()
+        img_arr = (img_arr * 255).clip(0, 255).astype(np.uint8)
+        img = Image.fromarray(img_arr, "RGBA")
+
+        row, col = divmod(i, cols)
+        canvas.paste(img, (col * sprite_size, row * sprite_size))
+
+    return canvas
+
+
 def build_demo(vqvae, transformer, device=DEVICE):
-    def generate(class_name, action, direction, temperature, top_k, top_p):
+    def generate_single(class_name, action, direction, temperature, top_k, top_p):
         img = generate_sprite(
             vqvae, transformer,
             class_name, action, direction,
@@ -102,8 +142,18 @@ def build_demo(vqvae, transformer, device=DEVICE):
         img = img.resize((128, 128), Image.NEAREST)
         return img
 
-    iface = gr.Interface(
-        fn=generate,
+    def generate_grid_tab(class_name, action, direction, temperature, top_k, top_p):
+        img = generate_grid(
+            vqvae, transformer, device,
+            rows=4, cols=4,
+            class_name=class_name, action=action, direction=direction,
+            temperature=temperature, top_k=top_k, top_p=top_p,
+        )
+        img = img.resize((512, 512), Image.NEAREST)
+        return img
+
+    single_tab = gr.Interface(
+        fn=generate_single,
         inputs=[
             gr.Dropdown(choices=CLASS_VOCAB, label="Character Class", value="character"),
             gr.Dropdown(choices=ACTION_VOCAB, label="Action", value="idle"),
@@ -113,11 +163,30 @@ def build_demo(vqvae, transformer, device=DEVICE):
             gr.Slider(0.0, 1.0, value=0.9, label="Top-P"),
         ],
         outputs=gr.Image(type="pil", label="Generated Sprite"),
-        title="Sprite Generator",
-        description="Generate pixel-art sprites using VQ-VAE + Transformer.",
+        title="Single Sprite",
     )
 
-    return iface
+    grid_tab = gr.Interface(
+        fn=generate_grid_tab,
+        inputs=[
+            gr.Dropdown(choices=CLASS_VOCAB, label="Character Class", value="character"),
+            gr.Dropdown(choices=ACTION_VOCAB, label="Action", value="idle"),
+            gr.Dropdown(choices=DIRECTION_VOCAB, label="Direction", value="front"),
+            gr.Slider(0.1, 2.0, value=1.0, label="Base Temperature"),
+            gr.Slider(1, 100, value=40, label="Top-K"),
+            gr.Slider(0.0, 1.0, value=0.9, label="Top-P"),
+        ],
+        outputs=gr.Image(type="pil", label="Generated Grid"),
+        title="Grid (4x4)",
+    )
+
+    demo = gr.TabbedInterface(
+        [single_tab, grid_tab],
+        tab_names=["Single", "Grid"],
+        title="Sprite Generator",
+    )
+
+    return demo
 
 
 # Load on module import for HF Spaces
