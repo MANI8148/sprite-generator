@@ -1,7 +1,6 @@
 from pathlib import Path
 
-WORKFLOW_DIR = Path(__file__).parent.parent / ".github" / "workflows"
-CI_FILE = WORKFLOW_DIR / "ci.yml"
+CI_FILE = Path(__file__).parent.parent / "scripts" / "ci.yml"
 
 
 class TestCIWorkflow:
