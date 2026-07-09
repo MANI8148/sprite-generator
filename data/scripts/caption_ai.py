@@ -22,7 +22,7 @@ def load_metadata(metadata_path: Path) -> list:
 def caption_with_api(
     img: Image.Image,
     api_token: str,
-    model: str = "google/vit-base-patch16-224",
+    model: str,
 ) -> dict:
     """Use HF Inference API for zero-shot classification."""
     headers = {"Authorization": f"Bearer {api_token}"}
@@ -80,7 +80,7 @@ def main():
     metadata_path = input_dir / "metadata.json"
     metadata = load_metadata(metadata_path)
 
-    use_api = args.hf_token is not None
+    use_api = args.hf_token is not None and args.model is not None
 
     for entry in tqdm(metadata, desc="Captioning sprites"):
         img_path = input_dir / entry["filename"]

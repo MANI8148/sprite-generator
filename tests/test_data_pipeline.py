@@ -6,6 +6,8 @@ import json
 import tempfile
 from pathlib import Path
 
+from unittest.mock import patch
+
 import numpy as np
 from PIL import Image
 import pytest
@@ -24,6 +26,7 @@ from data.scripts.augment_dataset import (
     horizontal_flip,
     DIRECTION_SWAP,
 )
+from data.scripts.caption_ai import caption_with_api
 
 
 class TestRemoveBackground:
@@ -253,3 +256,21 @@ class TestDirectionSwap:
         assert DIRECTION_SWAP[DIRECTION_SWAP["left"]] == "left"
         assert DIRECTION_SWAP[DIRECTION_SWAP["right"]] == "right"
         assert DIRECTION_SWAP[DIRECTION_SWAP["front_left"]] == "front_left"
+
+
+class TestCaptionAI:
+    @pytest.fixture
+    def sprite_image(self):
+        return Image.new("RGBA", (16, 32), (255, 0, 0, 255))
+
+    @patch("data.scripts.caption_ai.requests.post")
+    def test_caption_with_api_requires_model(self, mock_post, sprite_image):
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = [{"label": "dummy", "score": 0.9}]
+        result = caption_with_api(sprite_image, "fake_token", "some/model")
+        assert result["class"] == "dummy"
+
+    def test_caption_without_model_falls_back_to_local(self, sprite_image):
+        from data.scripts.caption_ai import caption_locally
+        result = caption_locally(sprite_image)
+        assert result["class"] == "character"
