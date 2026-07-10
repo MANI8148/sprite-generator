@@ -134,6 +134,29 @@ class VectorQuantizer(nn.Module):
         entropy = -torch.sum(probs * torch.log(probs + self.epsilon))
         return torch.exp(entropy)
 
+    def reset_dead_codes(self, z: torch.Tensor, encoding_indices: torch.Tensor, threshold: float = 0.0):
+        z_flat = z.permute(0, 2, 3, 1).contiguous().view(-1, self.embedding_dim)
+        indices_flat = encoding_indices.view(-1)
+        usage = torch.bincount(indices_flat, minlength=self.num_embeddings).float()
+        usage_frac = usage / usage.sum()
+        dead_mask = usage_frac <= threshold
+        n_dead = dead_mask.sum().item()
+        if n_dead == 0:
+            return n_dead
+        dead_indices = torch.where(dead_mask)[0]
+        n_sample = z_flat.size(0)
+        if n_sample >= n_dead:
+            chosen = torch.randperm(n_sample)[:n_dead]
+        else:
+            chosen = torch.randint(0, n_sample, (n_dead,))
+        new_embeddings = z_flat[chosen].detach()
+        with torch.no_grad():
+            self.embedding.weight.data[dead_indices] = new_embeddings
+            if self.training:
+                self.ema_count.data[dead_indices] = 0
+                self.ema_sum.data[:, dead_indices] = 0
+        return n_dead
+
 
 class VQVAE(nn.Module):
     def __init__(
@@ -186,3 +209,8 @@ class VQVAE(nn.Module):
         z = self.encoder(x)
         _, _, indices = self.quantizer(z)
         return self.quantizer.perplexity(indices)
+
+    def reset_dead_codes(self, x: torch.Tensor, threshold: float = 0.0) -> int:
+        z = self.encoder(x)
+        _, _, indices = self.quantizer(z)
+        return self.quantizer.reset_dead_codes(z, indices, threshold)

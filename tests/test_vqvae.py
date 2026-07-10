@@ -115,6 +115,36 @@ class TestVectorQuantizer:
         ppl = quantizer.perplexity(indices)
         assert ppl.item() == pytest.approx(1.0, abs=1e-4)
 
+    def test_reset_dead_codes_reinitializes_unused(self):
+        quantizer = VectorQuantizer(num_embeddings=8, embedding_dim=4)
+        z = torch.randn(1, 4, 4, 4)
+        _, _, indices = quantizer(z)
+        old_weight = quantizer.embedding.weight.data.clone()
+        n_reset = quantizer.reset_dead_codes(z, indices, threshold=0.0)
+        assert n_reset > 0
+        assert not torch.equal(quantizer.embedding.weight.data, old_weight)
+
+    def test_reset_dead_codes_no_dead_all_used(self):
+        quantizer = VectorQuantizer(num_embeddings=8, embedding_dim=4)
+        z = torch.randn(16, 4, 4, 4)
+        _, _, indices = quantizer(z)
+        usage = torch.bincount(indices.view(-1), minlength=8)
+        assert (usage > 0).sum().item() == 8
+        old_weight = quantizer.embedding.weight.data.clone()
+        n_reset = quantizer.reset_dead_codes(z, indices, threshold=0.0)
+        assert n_reset == 0
+        assert torch.equal(quantizer.embedding.weight.data, old_weight)
+
+    def test_reset_dead_codes_with_ema_buffers(self):
+        quantizer = VectorQuantizer(num_embeddings=8, embedding_dim=4)
+        quantizer.train()
+        z = torch.randn(1, 4, 4, 4)
+        _, _, indices = quantizer(z)
+        quantizer.ema_update(z, indices)
+        n_reset = quantizer.reset_dead_codes(z, indices, threshold=0.0)
+        dead_counts = (quantizer.ema_count == 0).sum().item()
+        assert dead_counts >= n_reset
+
 
 class TestVQVAE:
     def test_forward_shapes(self):
@@ -168,6 +198,15 @@ class TestVQVAE:
         x = torch.randn(2, 4, 32, 32)
         ppl = model.perplexity(x)
         assert 1.0 <= ppl <= model.quantizer.num_embeddings
+
+    def test_reset_dead_codes_on_vqvae(self):
+        model = VQVAE(in_channels=4, hidden_dim=32, latent_dim=16, num_embeddings=32)
+        x = torch.randn(1, 4, 32, 32)
+        old_weight = model.quantizer.embedding.weight.data.clone()
+        n_reset = model.reset_dead_codes(x, threshold=0.0)
+        total = model.quantizer.num_embeddings
+        assert 0 < n_reset <= total
+        assert not torch.equal(model.quantizer.embedding.weight.data, old_weight)
 
     def test_gradient_flow(self):
         model = VQVAE()
