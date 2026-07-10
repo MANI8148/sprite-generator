@@ -6,9 +6,12 @@ import os
 import sys
 import json
 import argparse
+import io
+import base64
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import requests
 from PIL import Image
 from tqdm import tqdm
@@ -19,50 +22,119 @@ def load_metadata(metadata_path: Path) -> list:
         return json.load(f)
 
 
+def _analyze_direction(img: Image.Image) -> str:
+    """Determine facing direction via horizontal center-of-mass of alpha channel."""
+    arr = np.array(img)
+    alpha = arr[:, :, 3].astype(np.float64)
+    if alpha.sum() == 0:
+        return "front"
+
+    h, w = alpha.shape
+    x_coords = np.arange(w, dtype=np.float64)
+    x_weights = alpha.sum(axis=0)
+    if x_weights.sum() == 0:
+        return "front"
+    cog_x = np.average(x_coords, weights=x_weights)
+    rel_x = cog_x / w
+
+    if rel_x < 0.4:
+        return "right"
+    elif rel_x > 0.6:
+        return "left"
+    return "front"
+
+
+def _analyze_action(img: Image.Image) -> str:
+    """Determine action via vertical variance comparison in alpha channel."""
+    arr = np.array(img)
+    alpha = arr[:, :, 3].astype(np.float64)
+    if alpha.sum() == 0:
+        return "idle"
+
+    h, w = alpha.shape
+    mid = h // 2
+    if mid == 0 or h == mid:
+        return "idle"
+
+    upper_var = alpha[:mid, :].var()
+    lower_var = alpha[mid:, :].var()
+
+    if lower_var > upper_var * 1.5 and upper_var > 0:
+        return "walking"
+    return "idle"
+
+
+def _classify_by_ratio(img: Image.Image) -> str:
+    """Classify sprite type by aspect ratio."""
+    width, height = img.size
+    ratio = height / width if width > 0 else 1
+    if ratio > 1.3:
+        return "character"
+    elif ratio < 0.7:
+        return "item"
+    return "tile"
+
+
+def _query_hf_vqa(
+    img: Image.Image,
+    api_token: str,
+    model: str,
+    question: str,
+) -> Optional[str]:
+    """Query a HF Inference API VQA model and return the answer text."""
+    headers = {"Authorization": f"Bearer {api_token}"}
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    image_b64 = base64.b64encode(buf.getvalue()).decode()
+
+    payload = {
+        "inputs": {
+            "image": image_b64,
+            "question": question,
+        }
+    }
+    resp = requests.post(
+        f"https://api-inference.huggingface.co/models/{model}",
+        headers=headers,
+        json=payload,
+        timeout=30,
+    )
+    if resp.status_code == 200:
+        data = resp.json()
+        if isinstance(data, list) and data:
+            if isinstance(data[0], dict):
+                return str(data[0].get("answer", ""))
+            return str(data[0])
+    return None
+
+
 def caption_with_api(
     img: Image.Image,
     api_token: str,
     model: str,
 ) -> dict:
-    """Use HF Inference API for zero-shot classification."""
-    headers = {"Authorization": f"Bearer {api_token}"}
+    """Use HF Inference API for multi-attribute VQA labeling."""
+    result = {}
 
-    # Convert image to bytes
-    import io
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
+    cls = _query_hf_vqa(img, api_token, model, "What type of game sprite is this?")
+    result["class"] = cls if cls else _classify_by_ratio(img)
 
-    # Use a simple image classification approach
-    response = requests.post(
-        f"https://api-inference.huggingface.co/models/{model}",
-        headers=headers,
-        data=buf.read(),
-        timeout=30,
-    )
+    action = _query_hf_vqa(img, api_token, model, "What action is this sprite performing?")
+    result["action"] = action if action else _analyze_action(img)
 
-    if response.status_code == 200:
-        result = response.json()
-        return {"class": str(result[0]["label"]) if result else "unknown", "action": "idle", "direction": "front"}
-    return {"class": "unknown", "action": "idle", "direction": "front"}
+    direction = _query_hf_vqa(img, api_token, model, "Which direction is this sprite facing?")
+    result["direction"] = direction if direction else _analyze_direction(img)
+
+    return result
 
 
 def caption_locally(img: Image.Image) -> dict:
-    """
-    Simple rule-based captioning since we don't have a vision model locally.
-    This is a placeholder - replace with an actual model call when available.
-    """
-    width, height = img.size
-    # Heuristic: tall sprites = characters, wide = items, square = tiles
-    ratio = height / width if width > 0 else 1
-    if ratio > 1.3:
-        cls = "character"
-    elif ratio < 0.7:
-        cls = "item"
-    else:
-        cls = "tile"
-
-    return {"class": cls, "action": "idle", "direction": "front"}
+    """Rule-based captioning using pixel analysis heuristics."""
+    return {
+        "class": _classify_by_ratio(img),
+        "action": _analyze_action(img),
+        "direction": _analyze_direction(img),
+    }
 
 
 def main():

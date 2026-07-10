@@ -19,14 +19,13 @@ from data.scripts.clean_normalize import (
     quantize_to_palette,
     build_global_palette,
 )
-from data.scripts.caption_ai import caption_locally
+from data.scripts.caption_ai import caption_locally, caption_with_api, _analyze_action, _analyze_direction
 from data.scripts.augment_dataset import (
     color_jitter,
     random_translate,
     horizontal_flip,
     DIRECTION_SWAP,
 )
-from data.scripts.caption_ai import caption_with_api
 
 
 class TestRemoveBackground:
@@ -174,13 +173,58 @@ class TestBuildGlobalPalette:
         assert len(palette) == 4
 
 
+class TestAnalyzeDirection:
+    def test_front_when_symmetric(self):
+        arr = np.zeros((32, 32, 4), dtype=np.uint8)
+        arr[:, 8:24, :3] = [255, 0, 0]
+        arr[:, 8:24, 3] = 255
+        img = Image.fromarray(arr, "RGBA")
+        assert _analyze_direction(img) == "front"
+
+    def test_right_when_mass_on_left(self):
+        arr = np.zeros((32, 32, 4), dtype=np.uint8)
+        arr[:, :20, :3] = [255, 0, 0]
+        arr[:, :20, 3] = 255
+        img = Image.fromarray(arr, "RGBA")
+        assert _analyze_direction(img) == "right"
+
+    def test_left_when_mass_on_right(self):
+        arr = np.zeros((32, 32, 4), dtype=np.uint8)
+        arr[:, 12:, :3] = [255, 0, 0]
+        arr[:, 12:, 3] = 255
+        img = Image.fromarray(arr, "RGBA")
+        assert _analyze_direction(img) == "left"
+
+    def test_fully_transparent_returns_front(self):
+        img = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+        assert _analyze_direction(img) == "front"
+
+
+class TestAnalyzeAction:
+    def test_idle_when_uniform(self):
+        arr = np.zeros((32, 32, 4), dtype=np.uint8)
+        arr[4:28, 4:28, :3] = [255, 0, 0]
+        arr[4:28, 4:28, 3] = 255
+        img = Image.fromarray(arr, "RGBA")
+        assert _analyze_action(img) == "idle"
+
+    def test_idle_when_upper_and_lower_var_similar(self):
+        arr = np.zeros((32, 32, 4), dtype=np.uint8)
+        arr[8:24, 8:24, :3] = [255, 0, 0]
+        arr[8:24, 8:24, 3] = 255
+        img = Image.fromarray(arr, "RGBA")
+        assert _analyze_action(img) == "idle"
+
+    def test_fully_transparent_returns_idle(self):
+        img = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+        assert _analyze_action(img) == "idle"
+
+
 class TestCaptionLocally:
     def test_tall_sprite_is_character(self):
         img = Image.new("RGBA", (16, 32), (255, 0, 0, 255))
         result = caption_locally(img)
         assert result["class"] == "character"
-        assert result["action"] == "idle"
-        assert result["direction"] == "front"
 
     def test_wide_sprite_is_item(self):
         img = Image.new("RGBA", (32, 16), (255, 0, 0, 255))
@@ -191,6 +235,15 @@ class TestCaptionLocally:
         img = Image.new("RGBA", (32, 32), (255, 0, 0, 255))
         result = caption_locally(img)
         assert result["class"] == "tile"
+
+    def test_locally_returns_derived_action_and_direction(self):
+        arr = np.zeros((32, 32, 4), dtype=np.uint8)
+        arr[:, :20, :3] = [255, 0, 0]
+        arr[:, :20, 3] = 255
+        img = Image.fromarray(arr, "RGBA")
+        result = caption_locally(img)
+        assert result["action"] in ("idle", "walking")
+        assert result["direction"] in ("left", "right", "front")
 
 
 class TestAugmentHorizontalFlip:
@@ -264,13 +317,21 @@ class TestCaptionAI:
         return Image.new("RGBA", (16, 32), (255, 0, 0, 255))
 
     @patch("data.scripts.caption_ai.requests.post")
-    def test_caption_with_api_requires_model(self, mock_post, sprite_image):
+    def test_caption_with_api_vqa(self, mock_post, sprite_image):
         mock_post.return_value.status_code = 200
-        mock_post.return_value.json.return_value = [{"label": "dummy", "score": 0.9}]
+        mock_post.return_value.json.return_value = [{"answer": "goblin"}]
         result = caption_with_api(sprite_image, "fake_token", "some/model")
-        assert result["class"] == "dummy"
+        assert result["class"] == "goblin"
+        assert "action" in result
+        assert "direction" in result
+
+    @patch("data.scripts.caption_ai.requests.post")
+    def test_caption_with_api_fallback_on_api_failure(self, mock_post, sprite_image):
+        mock_post.return_value.status_code = 503
+        mock_post.return_value.json.return_value = {"error": "overloaded"}
+        result = caption_with_api(sprite_image, "fake_token", "some/model")
+        assert result["class"] == "character"
 
     def test_caption_without_model_falls_back_to_local(self, sprite_image):
-        from data.scripts.caption_ai import caption_locally
         result = caption_locally(sprite_image)
         assert result["class"] == "character"
