@@ -126,8 +126,14 @@ class TestVectorQuantizer:
 
     def test_reset_dead_codes_no_dead_all_used(self):
         quantizer = VectorQuantizer(num_embeddings=8, embedding_dim=4)
-        z = torch.randn(16, 4, 4, 4)
+        z = torch.randn(32, 4, 4, 4)
         _, _, indices = quantizer(z)
+        for _ in range(50):
+            z = torch.randn(32, 4, 4, 4)
+            _, _, indices = quantizer(z)
+            usage = torch.bincount(indices.view(-1), minlength=8)
+            if (usage > 0).sum().item() == 8:
+                break
         usage = torch.bincount(indices.view(-1), minlength=8)
         assert (usage > 0).sum().item() == 8
         old_weight = quantizer.embedding.weight.data.clone()
