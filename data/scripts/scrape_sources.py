@@ -105,11 +105,11 @@ def download_pack(pack_name: str, output_dir: Path) -> int:
         return 0
 
 
-def main():
+def main(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(description="Scrape sprite packs from Kenney.nl")
     parser.add_argument("--output", "-o", default="data/raw", help="Output directory")
     parser.add_argument("--packs", nargs="+", help="Specific packs to download (default: all)")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
