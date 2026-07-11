@@ -179,7 +179,7 @@ class TestTrainingSteps:
         optimizer.step()
         model.ema_update(x)
 
-        assert model.quantizer.ema_count.sum().item() > 0, "EMA counts should be updated"
+        assert model.quantizer.ema_cluster_size.sum().item() > 0, "EMA counts should be updated"
 
     def test_training_with_ema_and_scheduler(self):
         model = VQVAE(in_channels=4, hidden_dim=32, latent_dim=16, num_embeddings=32, commitment_cost=0.1)

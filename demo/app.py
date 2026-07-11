@@ -28,9 +28,11 @@ def load_models(hf_repo: str = HF_REPO, hf_token: str = None, device: str = DEVI
     vqvae_ckpt = torch.load(hf_hub_download(hf_repo, "vqvae_latest.pt", token=hf_token), map_location=device)
     num_emb = vqvae_ckpt.get("config", {}).get("num_embeddings")
     if num_emb is None:
-        num_emb = vqvae_ckpt["model_state"]["quantizer.embedding.weight"].size(0)
+        num_emb = vqvae_ckpt["model_state"]["quantizer.embedding"].size(0)
     vqvae = VQVAE(num_embeddings=num_emb).to(device)
-    vqvae.load_state_dict(vqvae_ckpt["model_state"])
+    sd = vqvae_ckpt["model_state"]
+    sd = {k: v for k, v in sd.items() if not k.startswith("perceptual_loss.")}
+    vqvae.load_state_dict(sd)
     vqvae.eval()
 
     t_ckpt = torch.load(hf_hub_download(hf_repo, "transformer_latest.pt", token=hf_token), map_location=device)
