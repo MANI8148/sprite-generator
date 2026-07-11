@@ -39,14 +39,14 @@ class SelfAttention2d(nn.Module):
         B, C, H, W = x.shape
         qkv = self.qkv(x)
         q, k, v = qkv.chunk(3, dim=1)
-        q = q.flatten(2).transpose(-2, -1)
-        k = k.flatten(2).transpose(-2, -1)
-        v = v.flatten(2).transpose(-2, -1)
+        q = q.flatten(2).transpose(-2, -1).float()
+        k = k.flatten(2).transpose(-2, -1).float()
+        v = v.flatten(2).transpose(-2, -1).float()
         attn = (q @ k.transpose(-2, -1)) * (C ** -0.5)
         attn = F.softmax(attn, dim=-1)
         out = attn @ v
         out = out.transpose(-2, -1).reshape(B, C, H, W)
-        return self.proj(out)
+        return self.proj(out.to(x.dtype))
 
 
 class Encoder(nn.Module):
@@ -127,8 +127,9 @@ class VectorQuantizerEMA(nn.Module):
 
     def forward(self, z):
         z_flat = z.permute(0, 2, 3, 1).contiguous().view(-1, self.embedding_dim)
-        z_flat = F.normalize(z_flat, dim=-1)
-        emb = F.normalize(self.embedding, dim=-1)
+        z_norm = z_flat.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+        z_flat = z_flat / z_norm
+        emb = F.normalize(self.embedding, dim=-1).clamp(min=-1e3, max=1e3)
 
         dist = (
             z_flat.pow(2).sum(1, keepdim=True)
@@ -251,8 +252,8 @@ class VGGPerceptualLoss(nn.Module):
 
 
 def focal_frequency_loss(x, y, alpha=1.0):
-    x_freq = torch.fft.fftn(x, dim=(-2, -1))
-    y_freq = torch.fft.fftn(y, dim=(-2, -1))
+    x_freq = torch.fft.fftn(x.float(), dim=(-2, -1))
+    y_freq = torch.fft.fftn(y.float(), dim=(-2, -1))
     x_amp, x_phase = torch.abs(x_freq), torch.angle(x_freq)
     y_amp, y_phase = torch.abs(y_freq), torch.angle(y_freq)
     weights = 1.0 / (1.0 + torch.exp(-torch.abs(x_amp) * 0.1 + 5))
@@ -279,9 +280,9 @@ def sobel_edge_loss(x, y):
 
 def palette_histogram_loss(x, y, palette, alpha=1.0):
     B, C, H, W = x.shape
-    x_rgb = x[:, :3].permute(0, 2, 3, 1).reshape(-1, 3)
-    y_rgb = y[:, :3].permute(0, 2, 3, 1).reshape(-1, 3)
-    pal = torch.tensor(palette, dtype=x.dtype, device=x.device) / 255.0
+    x_rgb = x[:, :3].permute(0, 2, 3, 1).reshape(-1, 3).float()
+    y_rgb = y[:, :3].permute(0, 2, 3, 1).reshape(-1, 3).float()
+    pal = torch.tensor(palette, dtype=torch.float32, device=x.device) / 255.0
     x_dists = torch.cdist(x_rgb, pal)
     y_dists = torch.cdist(y_rgb, pal)
     x_soft = F.softmax(-x_dists * 10, dim=-1)
