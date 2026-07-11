@@ -17,9 +17,10 @@ from models.transformer.model import SpriteTransformer
 from models.transformer.train import CLASS_VOCAB, ACTION_VOCAB, DIRECTION_VOCAB
 from models.lora.model import SpriteLoRAWrapper
 from eval.metrics import palette_adherence_rate, grid_alignment_check
+from eval.generate_samples import post_process_sprite
 
 
-def generate_vqvae_samples(vqvae, transformer, device, conditions, temperature=1.0):
+def generate_vqvae_samples(vqvae, transformer, device, conditions, temperature=1.0, palette=None):
     vqvae.eval()
     transformer.eval()
     samples = []
@@ -46,12 +47,13 @@ def generate_vqvae_samples(vqvae, transformer, device, conditions, temperature=1
             recon = vqvae.decode_from_indices(indices, (vqvae.latent_dim, 8, 8))
             img_arr = recon[0].permute(1, 2, 0).cpu().numpy()
             img_arr = (img_arr * 255).clip(0, 255).astype(np.uint8)
+            img_arr = post_process_sprite(img_arr, palette)
             samples.append(Image.fromarray(img_arr, "RGBA"))
 
     return samples
 
 
-def generate_lora_samples(lora_model, device, num_samples):
+def generate_lora_samples(lora_model, device, num_samples, palette=None):
     lora_model.eval()
     samples = []
 
@@ -60,6 +62,7 @@ def generate_lora_samples(lora_model, device, num_samples):
         for i in range(num_samples):
             img_arr = generated[i].permute(1, 2, 0).cpu().numpy()
             img_arr = (img_arr * 255).clip(0, 255).astype(np.uint8)
+            img_arr = post_process_sprite(img_arr, palette)
             samples.append(Image.fromarray(img_arr, "RGBA"))
 
     return samples
@@ -134,9 +137,9 @@ def main():
     ]
 
     print("Generating VQ-VAE + Transformer samples...")
-    vqvae_samples = generate_vqvae_samples(vqvae, transformer, device, conditions, args.temperature)
+    vqvae_samples = generate_vqvae_samples(vqvae, transformer, device, conditions, args.temperature, palette)
     print("Generating LoRA samples...")
-    lora_samples = generate_lora_samples(lora_model, device, args.num_samples)
+    lora_samples = generate_lora_samples(lora_model, device, args.num_samples, palette)
 
     vqvae_metrics = compute_metrics(vqvae_samples, palette)
     lora_metrics = compute_metrics(lora_samples, palette)

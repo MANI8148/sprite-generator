@@ -16,6 +16,32 @@ from models.transformer.model import SpriteTransformer
 from models.transformer.train import CLASS_VOCAB, ACTION_VOCAB, DIRECTION_VOCAB
 
 
+def quantize_to_palette(img_array: np.ndarray, palette: list) -> np.ndarray:
+    result = img_array.copy()
+    pixels = result[:, :, :3].reshape(-1, 3)
+    alpha = result[:, :, 3].reshape(-1)
+    palette_arr = np.array(palette, dtype=float)
+
+    for i in range(len(pixels)):
+        if alpha[i] > 0:
+            d = np.linalg.norm(palette_arr - pixels[i].astype(float), axis=1)
+            pixels[i] = palette_arr[d.argmin()].astype(np.uint8)
+    return result
+
+
+def hard_alpha_edges(img_array: np.ndarray, threshold: int = 128) -> np.ndarray:
+    result = img_array.copy()
+    result[:, :, 3] = np.where(result[:, :, 3] > threshold, 255, 0)
+    return result
+
+
+def post_process_sprite(img_array: np.ndarray, palette: list = None) -> np.ndarray:
+    if palette is not None:
+        img_array = quantize_to_palette(img_array, palette)
+    img_array = hard_alpha_edges(img_array)
+    return img_array
+
+
 def load_models(hf_repo: str, device: str):
     vqvae_ckpt = torch.load(hf_hub_download(hf_repo, "vqvae_latest.pt"), map_location=device)
     num_emb = vqvae_ckpt.get("config", {}).get("num_embeddings")
@@ -47,7 +73,7 @@ def load_models(hf_repo: str, device: str):
     return vqvae, transformer
 
 
-def generate_grid(vqvae, transformer, device, grid_size=(4, 4), output_path="samples.png"):
+def generate_grid(vqvae, transformer, device, grid_size=(4, 4), output_path="samples.png", palette=None):
     rows, cols = grid_size
     total = rows * cols
     sprite_size = 32
@@ -83,6 +109,7 @@ def generate_grid(vqvae, transformer, device, grid_size=(4, 4), output_path="sam
 
         img_arr = recon[0].permute(1, 2, 0).cpu().detach().numpy()
         img_arr = (img_arr * 255).clip(0, 255).astype(np.uint8)
+        img_arr = post_process_sprite(img_arr, palette)
         img = Image.fromarray(img_arr, "RGBA")
 
         row, col = divmod(i, cols)
@@ -99,11 +126,21 @@ def main():
     parser.add_argument("--output", "-o", default="samples.png")
     parser.add_argument("--rows", type=int, default=4)
     parser.add_argument("--cols", type=int, default=4)
+    parser.add_argument("--palette", default=None, help="Path to palette JSON file")
     args = parser.parse_args()
+
+    palette = None
+    if args.palette:
+        palette_path = Path(args.palette)
+        if palette_path.exists():
+            import json
+            with open(palette_path) as f:
+                raw = json.load(f)
+                palette = [tuple(c) if isinstance(c, list) else c for c in raw]
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     vqvae, transformer = load_models(args.hf_repo, device)
-    generate_grid(vqvae, transformer, device, (args.rows, args.cols), args.output)
+    generate_grid(vqvae, transformer, device, (args.rows, args.cols), args.output, palette)
 
 
 if __name__ == "__main__":
