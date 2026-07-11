@@ -146,6 +146,7 @@ class VectorQuantizerEMA(nn.Module):
                 (1 - self.decay) * one_hot.sum(0)
             n = self.ema_cluster_size.sum()
             cluster_size = (self.ema_cluster_size + self.epsilon) / (n + self.num_embeddings * self.epsilon) * n
+            cluster_size = cluster_size.clamp(min=1e-3)
             dw = one_hot.t() @ z_flat
             self.ema_embedding.data = self.ema_embedding * self.decay + (1 - self.decay) * dw
             self.embedding.data = self.ema_embedding / cluster_size.unsqueeze(1)
