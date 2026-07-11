@@ -126,10 +126,13 @@ class VectorQuantizerEMA(nn.Module):
         self.embedding: torch.Tensor
 
     def forward(self, z):
-        z_flat = z.permute(0, 2, 3, 1).contiguous().view(-1, self.embedding_dim)
-        z_norm = z_flat.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+        # Run quantizer in fp32 for numerical stability (avoids fp16 norm underflow, matmul overflow, div-by-tiny)
+        orig_dtype = z.dtype
+        z_fp32 = z.float()
+        z_flat = z_fp32.permute(0, 2, 3, 1).contiguous().view(-1, self.embedding_dim)
+        z_norm = z_flat.norm(dim=-1, keepdim=True).clamp(min=1e-6)
         z_flat = z_flat / z_norm
-        emb = F.normalize(self.embedding, dim=-1).clamp(min=-1e3, max=1e3)
+        emb = F.normalize(self.embedding.float(), dim=-1).clamp(min=-1e3, max=1e3)
 
         dist = (
             z_flat.pow(2).sum(1, keepdim=True)
@@ -138,23 +141,22 @@ class VectorQuantizerEMA(nn.Module):
         )
         indices = dist.argmin(dim=1)
         one_hot = F.one_hot(indices, self.num_embeddings).float()
-        quantized = one_hot @ self.embedding
-        quantized = quantized.view_as(z)
+        quantized = one_hot @ self.embedding.float()
+        quantized = quantized.view_as(z_fp32)
 
         if self.training:
             self.ema_cluster_size.data = self.ema_cluster_size * self.decay + \
                 (1 - self.decay) * one_hot.sum(0)
             n = self.ema_cluster_size.sum()
-            # Laplace smoothing: (cluster_size + eps) / (n + K*eps) * n
-            # eps=1e-3 provides a safe fp16 floor (~3.8e-4 for unused codes in early batches)
             cluster_size = (self.ema_cluster_size + self.epsilon) / (n + self.num_embeddings * self.epsilon) * n
-            dw = one_hot.t() @ z_flat.float()
+            cluster_size = cluster_size.clamp(min=1e-3)
+            dw = one_hot.t() @ z_flat
             self.ema_embedding.data = self.ema_embedding * self.decay + (1 - self.decay) * dw
             self.embedding.data = self.ema_embedding / cluster_size.unsqueeze(1)
 
-        vq_loss = self.commitment_cost * F.mse_loss(quantized.detach(), z)
-        quantized = z + (quantized - z).detach()
-        return quantized, vq_loss, indices
+        vq_loss = self.commitment_cost * F.mse_loss(quantized.detach(), z_fp32)
+        quantized = z_fp32 + (quantized - z_fp32).detach()
+        return quantized.to(orig_dtype), vq_loss.to(orig_dtype), indices
 
     def get_codebook_entry(self, indices):
         return F.embedding(indices, self.embedding)
@@ -266,18 +268,20 @@ def focal_frequency_loss(x, y, alpha=1.0):
 
 
 def sobel_edge_loss(x, y):
-    sobel_x = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=x.dtype, device=x.device).view(1, 1, 3, 3)
-    sobel_y = torch.tensor([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=x.dtype, device=x.device).view(1, 1, 3, 3)
+    x_f = x.float()
+    y_f = y.float()
+    sobel_x = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=torch.float32, device=x.device).view(1, 1, 3, 3)
+    sobel_y = torch.tensor([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=torch.float32, device=x.device).view(1, 1, 3, 3)
     loss = 0.0
-    for c in range(min(x.size(1), 3)):
-        x_edge_x = F.conv2d(x[:, c:c+1], sobel_x, padding=1)
-        x_edge_y = F.conv2d(x[:, c:c+1], sobel_y, padding=1)
+    for c in range(min(x_f.size(1), 3)):
+        x_edge_x = F.conv2d(x_f[:, c:c+1], sobel_x, padding=1)
+        x_edge_y = F.conv2d(x_f[:, c:c+1], sobel_y, padding=1)
         x_edge = torch.sqrt(x_edge_x ** 2 + x_edge_y ** 2 + 1e-8)
-        y_edge_x = F.conv2d(y[:, c:c+1], sobel_x, padding=1)
-        y_edge_y = F.conv2d(y[:, c:c+1], sobel_y, padding=1)
+        y_edge_x = F.conv2d(y_f[:, c:c+1], sobel_x, padding=1)
+        y_edge_y = F.conv2d(y_f[:, c:c+1], sobel_y, padding=1)
         y_edge = torch.sqrt(y_edge_x ** 2 + y_edge_y ** 2 + 1e-8)
         loss += F.l1_loss(x_edge, y_edge)
-    return loss / min(x.size(1), 3)
+    return loss / min(x_f.size(1), 3)
 
 
 def palette_histogram_loss(x, y, palette, alpha=1.0):
