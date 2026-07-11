@@ -126,13 +126,10 @@ class VectorQuantizerEMA(nn.Module):
         self.embedding: torch.Tensor
 
     def forward(self, z):
-        # Run quantizer in fp32 for numerical stability (avoids fp16 norm underflow, matmul overflow, div-by-tiny)
         orig_dtype = z.dtype
         z_fp32 = z.float()
         z_flat = z_fp32.permute(0, 2, 3, 1).contiguous().view(-1, self.embedding_dim)
-        z_norm = z_flat.norm(dim=-1, keepdim=True).clamp(min=1e-6)
-        z_flat = z_flat / z_norm
-        emb = F.normalize(self.embedding.float(), dim=-1).clamp(min=-1e3, max=1e3)
+        emb = F.normalize(self.embedding.float(), dim=-1)
 
         dist = (
             z_flat.pow(2).sum(1, keepdim=True)
@@ -141,7 +138,7 @@ class VectorQuantizerEMA(nn.Module):
         )
         indices = dist.argmin(dim=1)
         one_hot = F.one_hot(indices, self.num_embeddings).float()
-        quantized = one_hot @ self.embedding.float()
+        quantized = one_hot @ emb
         quantized = quantized.view_as(z_fp32)
 
         if self.training:
@@ -159,7 +156,7 @@ class VectorQuantizerEMA(nn.Module):
         return quantized.to(orig_dtype), vq_loss.to(orig_dtype), indices
 
     def get_codebook_entry(self, indices):
-        return F.embedding(indices, self.embedding)
+        return F.normalize(F.embedding(indices, self.embedding), dim=-1)
 
     def perplexity(self, indices):
         idx_flat = indices.view(-1)
