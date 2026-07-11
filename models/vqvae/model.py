@@ -322,8 +322,11 @@ class ImprovedVQVAE(nn.Module):
 
     def forward(self, x, return_skips=False):
         z, skips = self.encoder(x)
-        quantized, vq_loss, indices = self.quantizer(z)
-        recon = self.decoder(quantized, *skips)
+        # Run quantizer + decoder in fp32 for numerical stability (avoids fp16 overflow in decoder convs)
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            z_fp32 = z.float()
+            quantized, vq_loss, indices = self.quantizer(z_fp32)
+            recon = self.decoder(quantized, *skips)
         recon_loss = F.mse_loss(recon, x)
         loss = recon_loss + vq_loss
         result = {
