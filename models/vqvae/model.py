@@ -111,7 +111,7 @@ class Decoder(nn.Module):
 
 class VectorQuantizerEMA(nn.Module):
     def __init__(self, num_embeddings: int = 512, embedding_dim: int = 96,
-                 commitment_cost: float = 0.25, decay: float = 0.99, epsilon: float = 1e-5):
+                 commitment_cost: float = 0.25, decay: float = 0.99, epsilon: float = 1e-3):
         super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -145,9 +145,10 @@ class VectorQuantizerEMA(nn.Module):
             self.ema_cluster_size.data = self.ema_cluster_size * self.decay + \
                 (1 - self.decay) * one_hot.sum(0)
             n = self.ema_cluster_size.sum()
+            # Laplace smoothing: (cluster_size + eps) / (n + K*eps) * n
+            # eps=1e-3 provides a safe fp16 floor (~3.8e-4 for unused codes in early batches)
             cluster_size = (self.ema_cluster_size + self.epsilon) / (n + self.num_embeddings * self.epsilon) * n
-            cluster_size = cluster_size.clamp(min=1e-3)
-            dw = one_hot.t() @ z_flat
+            dw = one_hot.t() @ z_flat.float()
             self.ema_embedding.data = self.ema_embedding * self.decay + (1 - self.decay) * dw
             self.embedding.data = self.ema_embedding / cluster_size.unsqueeze(1)
 
