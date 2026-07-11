@@ -64,7 +64,7 @@ def compute_diversity_score(images: list, vqvae, device) -> float:
         for img in images:
             arr = np.array(img.convert("RGBA").resize((32, 32)), dtype=np.float32) / 255.0
             tensor = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0).to(device)
-            z = vqvae.encoder(tensor)
+            z, _ = vqvae.encoder(tensor)
             z_flat = z.view(z.size(0), -1)
             all_latents.append(z_flat)
 

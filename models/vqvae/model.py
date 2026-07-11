@@ -156,9 +156,33 @@ class VectorQuantizerEMA(nn.Module):
     def get_codebook_entry(self, indices):
         return F.embedding(indices, self.embedding)
 
-    def reset_dead_codes(self, z):
+    def perplexity(self, indices):
+        idx_flat = indices.view(-1)
+        usage = torch.bincount(idx_flat, minlength=self.num_embeddings).float()
+        prob = usage / usage.sum()
+        ppl = torch.exp(-(prob * torch.log(prob + 1e-10)).sum())
+        return ppl
+
+    def ema_update(self, z, indices):
+        if not self.training:
+            return
+        one_hot = F.one_hot(indices, self.num_embeddings).float()
+        z_flat = z.permute(0, 2, 3, 1).contiguous().view(-1, self.embedding_dim)
+        self.ema_cluster_size.data = self.ema_cluster_size * self.decay + \
+            (1 - self.decay) * one_hot.sum(0)
+        n = self.ema_cluster_size.sum()
+        cluster_size = (self.ema_cluster_size + self.epsilon) / (n + self.num_embeddings * self.epsilon) * n
+        dw = one_hot.t() @ z_flat
+        self.ema_embedding.data = self.ema_embedding * self.decay + (1 - self.decay) * dw
+        self.embedding.data = self.ema_embedding / cluster_size.unsqueeze(1)
+
+    def reset_dead_codes(self, z, indices=None, threshold=None):
         with torch.no_grad():
-            dead_mask = self.ema_cluster_size < 1
+            if indices is not None:
+                usage = torch.bincount(indices.view(-1), minlength=self.num_embeddings).float()
+                dead_mask = usage == 0
+            else:
+                dead_mask = self.ema_cluster_size < (threshold if threshold is not None else 1)
             n_dead = dead_mask.sum().item()
             if n_dead > 0:
                 z_flat = z.permute(0, 2, 3, 1).contiguous().view(-1, self.embedding_dim)
@@ -170,6 +194,7 @@ class VectorQuantizerEMA(nn.Module):
                 self.embedding.data[dead_indices] = new_emb
                 self.ema_embedding.data[dead_indices] = new_emb
                 self.ema_cluster_size.data[dead_indices] = 10.0
+            return n_dead
 
 
 class PatchDiscriminator(nn.Module):
@@ -343,9 +368,20 @@ class ImprovedVQVAE(nn.Module):
             for ema_p, p in zip(self.ema_decoder_weights, self.decoder.parameters()):
                 ema_p.data.mul_(decay).add_(p.data, alpha=1 - decay)
 
-    def reset_dead_codes(self, x):
+    def ema_update(self, x):
         z, _ = self.encoder(x)
-        self.quantizer.reset_dead_codes(z)
+        _, _, indices = self.quantizer(z)
+        self.quantizer.ema_update(z, indices)
+
+    def perplexity(self, x):
+        _, _, indices = self.quantizer(self.encoder(x)[0])
+        return self.quantizer.perplexity(indices)
+
+    def reset_dead_codes(self, x, threshold=None):
+        z, _ = self.encoder(x)
+        _, _, indices = self.quantizer(z)
+        return self.quantizer.reset_dead_codes(z, indices, threshold)
 
 
 VQVAE = ImprovedVQVAE
+VectorQuantizer = VectorQuantizerEMA

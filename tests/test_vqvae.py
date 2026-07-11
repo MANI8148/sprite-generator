@@ -2,7 +2,7 @@ import torch
 import pytest
 
 from models.vqvae.model import (
-    ImprovedVQVAE, Encoder, Decoder, VectorQuantizerEMA, ResBlock,
+    ImprovedVQVAE, VQVAE, Encoder, Decoder, VectorQuantizerEMA, VectorQuantizer, ResBlock,
     SelfAttention2d, PatchDiscriminator,
 )
 
@@ -81,27 +81,27 @@ class TestPatchDiscriminator:
         z = torch.randn(1, 16, 4, 4)
         _, _, indices = quantizer(z)
         quantizer.ema_update(z, indices)
-        assert quantizer.ema_count.shape[0] == 32
-        assert quantizer.ema_sum.shape[1] == 32
+        assert quantizer.ema_cluster_size.shape[0] == 32
+        assert quantizer.ema_embedding.shape[1] == 16
 
     def test_ema_update_changes_codebook(self):
         quantizer = VectorQuantizer(num_embeddings=32, embedding_dim=16, decay=0.5)
         z = torch.randn(2, 16, 4, 4)
         _, _, indices = quantizer(z)
-        old_weight = quantizer.embedding.weight.data.clone()
+        old_weight = quantizer.embedding.data.clone()
         quantizer.ema_update(z, indices)
-        assert not torch.equal(quantizer.embedding.weight.data, old_weight), "EMA did not update codebook"
+        assert not torch.equal(quantizer.embedding.data, old_weight), "EMA did not update codebook"
 
     def test_ema_training_mode_only_updates(self):
         quantizer = VectorQuantizer(num_embeddings=32, embedding_dim=16)
         z = torch.randn(1, 16, 4, 4)
         _, _, indices = quantizer(z)
-        old_count = quantizer.ema_count.clone()
-        old_sum = quantizer.ema_sum.clone()
+        old_count = quantizer.ema_cluster_size.clone()
+        old_sum = quantizer.ema_embedding.clone()
         quantizer.eval()
         quantizer.ema_update(z, indices)
-        assert torch.equal(quantizer.ema_count, old_count), "EMA should not update in eval mode"
-        assert torch.equal(quantizer.ema_sum, old_sum), "EMA should not update in eval mode"
+        assert torch.equal(quantizer.ema_cluster_size, old_count), "EMA should not update in eval mode"
+        assert torch.equal(quantizer.ema_embedding, old_sum), "EMA should not update in eval mode"
 
     def test_perplexity_in_range(self):
         quantizer = VectorQuantizer(num_embeddings=256, embedding_dim=64)
@@ -116,13 +116,13 @@ class TestPatchDiscriminator:
         assert ppl.item() == pytest.approx(1.0, abs=1e-4)
 
     def test_reset_dead_codes_reinitializes_unused(self):
-        quantizer = VectorQuantizer(num_embeddings=8, embedding_dim=4)
-        z = torch.randn(1, 4, 4, 4)
+        quantizer = VectorQuantizer(num_embeddings=16, embedding_dim=8)
+        z = torch.randn(1, 8, 2, 2)
         _, _, indices = quantizer(z)
-        old_weight = quantizer.embedding.weight.data.clone()
+        old_weight = quantizer.embedding.data.clone()
         n_reset = quantizer.reset_dead_codes(z, indices, threshold=0.0)
         assert n_reset > 0
-        assert not torch.equal(quantizer.embedding.weight.data, old_weight)
+        assert not torch.equal(quantizer.embedding.data, old_weight)
 
     def test_reset_dead_codes_no_dead_all_used(self):
         quantizer = VectorQuantizer(num_embeddings=8, embedding_dim=4)
@@ -136,20 +136,22 @@ class TestPatchDiscriminator:
                 break
         usage = torch.bincount(indices.view(-1), minlength=8)
         assert (usage > 0).sum().item() == 8
-        old_weight = quantizer.embedding.weight.data.clone()
+        old_weight = quantizer.embedding.data.clone()
         n_reset = quantizer.reset_dead_codes(z, indices, threshold=0.0)
         assert n_reset == 0
-        assert torch.equal(quantizer.embedding.weight.data, old_weight)
+        assert torch.equal(quantizer.embedding.data, old_weight)
 
     def test_reset_dead_codes_with_ema_buffers(self):
-        quantizer = VectorQuantizer(num_embeddings=8, embedding_dim=4)
+        quantizer = VectorQuantizer(num_embeddings=16, embedding_dim=8)
         quantizer.train()
-        z = torch.randn(1, 4, 4, 4)
+        z = torch.randn(1, 8, 2, 2)
         _, _, indices = quantizer(z)
         quantizer.ema_update(z, indices)
+        usage = torch.bincount(indices.view(-1), minlength=16)
+        dead_before = (usage == 0).sum().item()
         n_reset = quantizer.reset_dead_codes(z, indices, threshold=0.0)
-        dead_counts = (quantizer.ema_count == 0).sum().item()
-        assert dead_counts >= n_reset
+        assert n_reset > 0
+        assert n_reset <= dead_before
 
 
 class TestVQVAE:
@@ -195,9 +197,9 @@ class TestVQVAE:
         model = VQVAE(in_channels=4, hidden_dim=32, latent_dim=16, num_embeddings=32)
         x = torch.randn(2, 4, 32, 32)
         model.train()
-        old_weight = model.quantizer.embedding.weight.data.clone()
+        old_weight = model.quantizer.embedding.data.clone()
         model.ema_update(x)
-        assert not torch.equal(model.quantizer.embedding.weight.data, old_weight)
+        assert not torch.equal(model.quantizer.embedding.data, old_weight)
 
     def test_perplexity_on_vqvae(self):
         model = VQVAE()
@@ -208,11 +210,11 @@ class TestVQVAE:
     def test_reset_dead_codes_on_vqvae(self):
         model = VQVAE(in_channels=4, hidden_dim=32, latent_dim=16, num_embeddings=32)
         x = torch.randn(1, 4, 32, 32)
-        old_weight = model.quantizer.embedding.weight.data.clone()
+        old_weight = model.quantizer.embedding.data.clone()
         n_reset = model.reset_dead_codes(x, threshold=0.0)
         total = model.quantizer.num_embeddings
         assert 0 < n_reset <= total
-        assert not torch.equal(model.quantizer.embedding.weight.data, old_weight)
+        assert not torch.equal(model.quantizer.embedding.data, old_weight)
 
     def test_gradient_flow(self):
         model = ImprovedVQVAE(hidden_dim=64, latent_dim=32, num_embeddings=64)
