@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "sprite-generator"
+version = "0.1.0"
+description = "A from-scratch discrete-latent sprite generator using VQ-VAE + conditional transformer"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "MANI8148", email = "manikantapotla3@gmail.com"},
+]
+keywords = ["sprite", "generator", "vqvae", "transformer", "pixel-art"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Intended Audience :: Developers",
+]
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "transformers>=4.30.0",
+    "datasets>=2.12.0",
+    "huggingface_hub>=0.15.0",
+    "gradio>=3.40.0",
+    "Pillow>=9.5.0",
+    "numpy>=1.24.0",
+    "tqdm>=4.65.0",
+    "requests>=2.30.0",
+    "scipy>=1.10.0",
+    "imagehash>=4.3.0",
+    "diffusers>=0.21.0",
+    "peft>=0.6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/MANI8148/sprite-generator"
+Repository = "https://github.com/MANI8148/sprite-generator"
