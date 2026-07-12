@@ -1,0 +1,16 @@
+torch>=2.0.0
+torchvision>=0.15.0
+diffusers>=0.25.0
+transformers>=4.36.0
+accelerate>=0.25.0
+peft>=0.7.0
+safetensors>=0.4.0
+pillow>=10.0.0
+numpy<2.0
+scipy>=1.10.0
+rembg>=0.0.32
+fastapi>=0.100.0
+uvicorn>=0.22.0
+python-multipart>=0.0.6
+gradio>=4.0.0
+pydantic>=2.0.0

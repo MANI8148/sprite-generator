@@ -1,11 +1,89 @@
-# Roadmap
+# AI Game Asset Pipeline — ROADMAP
 
-1. Setup project structure and data pipeline ✓
-2. Build VQ-VAE model and training loop ✓
-3. Build Transformer prior with conditioning ✓
-4. Train on Kaggle and push checkpoints ✓
-5. Write evaluation metrics and sample generation ✓
-6. Build Gradio demo for HF Spaces ✓
-7. Wire GitHub Actions automation ✓
-8. Add Path A (LoRA comparison) ✓
-9. Add sprite animation sequence generation and GIF export ✓
+## Philosophy
+The LoRA is NOT the product. The pipeline is the product.
+We build an end-to-end asset pipeline, not a better image generator.
+
+## Structure
+```
+backend/
+├── main.py                    # FastAPI entry point
+├── api/                       # API route definitions
+└── modules/
+    ├── generator/             # SD 1.5 LoRA inference
+    ├── pipeline/              # Orchestrator (end-to-end flow)
+    ├── postprocess/           # rembg, palette, cleanup, upscale
+    ├── packing/               # Sprite sheet, tileset, animation strip
+    ├── exporters/             # Godot, Unity, generic PNG, ZIP
+    ├── validation/            # Quality metrics (palette, sharpness, etc.)
+    ├── prompt_builder/        # Structured controls → optimized prompt
+    └── storage/               # Local file management
+
+gradio_app/
+└── app.py                     # MVP frontend (Gradio)
+
+kaggle/
+└── kaggle_complete_train.ipynb  # LoRA training notebook
+```
+
+## Pipeline Flow
+```
+User Controls (AssetType, View, Palette, etc.)
+    ↓
+Prompt Builder → structured prompt
+    ↓
+SD 1.5 LoRA Generator → raw images
+    ↓
+Post-Processing (rembg, palette↓, cleanup, center, upscale)
+    ↓
+Validation Metrics (quality tier, report)
+    ↓
+Packing (sprite sheet / animation strip / tileset)
+    ↓
+Exporters (Godot .tres / Unity .meta / PNG + ZIP)
+    ↓
+Download
+```
+
+## Milestones
+
+### MVP — Gradio Demo (NOW)
+- [x] Modular pipeline architecture (all 8 modules)
+- [x] Prompt builder with structured controls
+- [x] Post-processing (rembg, palette reduction, pixel cleanup, auto-center, upscale)
+- [x] Validation metrics (palette, sharpness, centering, transparency, outline)
+- [x] Sprite packing (sprite sheet, animation strip)
+- [x] Exporters (Godot, Unity, generic PNG + ZIP)
+- [x] Pipeline orchestrator
+- [ ] Deploy Gradio demo on Hugging Face Spaces
+- [ ] Smoke test with real LoRA weights end-to-end
+
+### Phase 1 — FastAPI + Next.js
+- [ ] FastAPI backend with /generate, /download, /health, /history
+- [ ] Next.js frontend with Generate, History, Downloads, Settings pages
+- [ ] File-based storage (no DB yet)
+- [ ] Rate limiting (per-IP, no auth)
+- [ ] Deploy on HF Spaces or cheap VPS
+
+### Phase 2 — Production Hardening
+- [ ] SQLite → PostgreSQL (only when needed)
+- [ ] Background task queue (only when concurrent users > 1)
+- [ ] Asset library with persistent storage
+- [ ] Multi-asset batch generation
+- [ ] Style consistency engine (IP-Adapter, palette lock)
+
+### Phase 3 — Scale
+- [ ] More generator modules (tilesets, environments, UI, props)
+- [ ] More exporters (GameMaker, Phaser)
+- [ ] Cloud storage (Cloudflare R2)
+- [ ] Incremental regeneration ("asset memory")
+
+## Explicitly Deferred
+- ❌ Billing / payments
+- ❌ Authentication / user accounts
+- ❌ LLM Project Director
+- ❌ Celery / Redis / DAG orchestrator
+- ❌ Multi-user team features
+- ❌ Real-ESRGAN upscaling
+
+Until the MVP is validated with real users.
