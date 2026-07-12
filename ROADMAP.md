@@ -8,3 +8,4 @@
 6. Build Gradio demo for HF Spaces ✓
 7. Wire GitHub Actions automation ✓
 8. Add Path A (LoRA comparison) ✓
+9. Add sprite animation sequence generation and GIF export ✓
