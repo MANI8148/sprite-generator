@@ -26,7 +26,7 @@ def remove_background(
     except ImportError:
         rgba = to_rgba(image)
         arr = np.array(rgba)
-        bg_color = arr[0, 0].copy()
+        bg_color = arr[0, 0, :3].copy()
         mask = np.all(arr[:, :, :3] == bg_color, axis=2)
         arr[..., 3] = np.where(mask, 0, 255)
         return Image.fromarray(arr)
