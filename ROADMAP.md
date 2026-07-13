@@ -55,7 +55,7 @@ Download
 - [x] Sprite packing (sprite sheet, animation strip)
 - [x] Exporters (Godot, Unity, generic PNG + ZIP)
 - [x] Pipeline orchestrator
-- [ ] Deploy Gradio demo on Hugging Face Spaces
+- [x] Deploy Gradio demo on Hugging Face Spaces
 - [ ] Smoke test with real LoRA weights end-to-end
 
 ### Phase 1 — FastAPI + Next.js
