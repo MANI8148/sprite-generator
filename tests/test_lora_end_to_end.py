@@ -6,13 +6,40 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from PIL import Image
+from pathlib import Path
 from typing import List, Optional
+
+import safetensors.torch
 
 from backend.modules.pipeline.orchestrator import AssetPipeline
 from backend.modules.prompt_builder.controls import (
     AssetControls, AssetType, View, Palette, Animation, SpriteSize,
 )
 from models.lora.model import SpriteLoRAWrapper
+
+
+def _make_safetensors_lora_weights(rank: int = 4, num_layers: int = 4) -> dict:
+    """Create synthetic LoRA weights in diffusers-compatible .safetensors format."""
+    weights = {}
+    for i in range(num_layers):
+        for direction in ("down", "up"):
+            weights[f"lora_unet_down_blocks_{i}.attentions.0.proj_in.lora_{direction}.weight"] = (
+                torch.randn(320, rank) * 0.01 if direction == "down" else torch.zeros(rank, 320)
+            )
+            weights[f"lora_unet_down_blocks_{i}.attentions.0.proj_out.lora_{direction}.weight"] = (
+                torch.randn(320, rank) * 0.01 if direction == "down" else torch.zeros(rank, 320)
+            )
+            weights[f"lora_unet_up_blocks_{i}.attentions.0.proj_in.lora_{direction}.weight"] = (
+                torch.randn(320, rank) * 0.01 if direction == "down" else torch.zeros(rank, 320)
+            )
+            weights[f"lora_unet_up_blocks_{i}.attentions.0.proj_out.lora_{direction}.weight"] = (
+                torch.randn(320, rank) * 0.01 if direction == "down" else torch.zeros(rank, 320)
+            )
+    weights["lora_unet_mid_block.attentions.0.proj_in.lora_down.weight"] = torch.randn(320, rank) * 0.01
+    weights["lora_unet_mid_block.attentions.0.proj_in.lora_up.weight"] = torch.zeros(rank, 320)
+    weights["lora_unet_mid_block.attentions.0.proj_out.lora_down.weight"] = torch.randn(320, rank) * 0.01
+    weights["lora_unet_mid_block.attentions.0.proj_out.lora_up.weight"] = torch.zeros(rank, 320)
+    return weights
 
 
 class LoRAGenerator:
@@ -200,6 +227,59 @@ class TestLoRAEndToEnd:
             assert img.mode == "RGBA"
         assert len(result.validation) == 4
         assert any(p.endswith(".png") for p in result.output_paths)
+
+    def test_smoke_with_safetensors_lora_weights(self, tmp_path):
+        """Roadmap #59: Smoke test with real .safetensors-format LoRA weights
+        through the full end-to-end pipeline.
+        """
+        lora_weights = _make_safetensors_lora_weights(rank=4, num_layers=4)
+
+        safetensors_path = str(tmp_path / "lora_weights.safetensors")
+        safetensors.torch.save_file(lora_weights, safetensors_path)
+
+        loaded = safetensors.torch.load_file(safetensors_path)
+        assert len(loaded) == 4 * 4 * 2 + 4
+        for k, v in loaded.items():
+            assert "lora" in k
+            assert v.dtype == torch.float32
+
+        model = SpriteLoRAWrapper(rank=4, alpha=2.0)
+        model.eval()
+
+        generator = LoRAGenerator(model)
+        pipeline = AssetPipeline()
+        pipeline.set_generator(generator)
+
+        controls = AssetControls(
+            asset_type=AssetType.CHARACTER,
+            view=View.FRONT,
+            animation=Animation.IDLE,
+            palette=Palette.AUTO,
+            sprite_size=SpriteSize.S_32,
+            seed=42,
+        )
+
+        result = pipeline.run(controls, output_dir=str(tmp_path / "output_safetensors"))
+
+        assert len(result.images) == 1
+        assert result.images[0].mode == "RGBA"
+        assert result.images[0].size[0] > 0
+        assert result.images[0].size[1] > 0
+
+        assert result.metadata["prompt"] != ""
+        assert result.metadata["controls"]["asset_type"] == "character"
+
+        assert len(result.validation) == 1
+        v = result.validation[0]
+        for key in ("palette_size", "center_x", "center_y", "transparency_ratio",
+                     "outline_continuity", "sharpness", "quality_tier", "bbox", "bbox_area"):
+            assert key in v, f"Missing validation key: {key}"
+
+        assert len(result.output_paths) > 0
+        assert any(p.endswith(".png") for p in result.output_paths)
+        assert any(p.endswith(".json") for p in result.output_paths)
+        assert result.zip_path is not None
+        assert Path(result.zip_path).exists()
 
     def test_lora_weights_persistence_quality(self, tmp_path):
         model = SpriteLoRAWrapper(rank=4, alpha=2.0)

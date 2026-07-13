@@ -56,7 +56,7 @@ Download
 - [x] Exporters (Godot, Unity, generic PNG + ZIP)
 - [x] Pipeline orchestrator
 - [x] Deploy Gradio demo on Hugging Face Spaces
-- [ ] Smoke test with real LoRA weights end-to-end
+- [x] Smoke test with real LoRA weights end-to-end
 
 ### Phase 1 — FastAPI + Next.js
 - [ ] FastAPI backend with /generate, /download, /health, /history
