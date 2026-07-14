@@ -2,6 +2,7 @@
 
 import os
 import json
+import tempfile
 from pathlib import Path
 from typing import List, Optional
 from unittest.mock import MagicMock
@@ -12,11 +13,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.api.routes import (
-    router, set_pipeline, set_generator_loaded, get_history,
-    get_pipeline, _history, _generator_loaded,
+    router, set_pipeline, set_generator_loaded,
+    get_pipeline, set_storage, _generator_loaded,
 )
 from backend.modules.pipeline.orchestrator import AssetPipeline, PipelineConfig
 from backend.modules.prompt_builder.controls import AssetControls
+from backend.modules.storage.file_storage import FileStorage
 from backend.main import app
 
 
@@ -51,8 +53,9 @@ class FakeGenerator:
 
 @pytest.fixture(autouse=True)
 def reset_state():
-    _history.clear()
     set_generator_loaded(False)
+    tmp = tempfile.mkdtemp()
+    set_storage(FileStorage(base_dir=tmp))
 
 
 @pytest.fixture

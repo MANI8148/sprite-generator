@@ -9,12 +9,13 @@ from backend.modules.prompt_builder.controls import (
     AssetControls, AssetType, View, Palette, Animation, SpriteSize,
 )
 from backend.modules.pipeline.orchestrator import AssetPipeline, PipelineConfig
+from backend.modules.storage.file_storage import FileStorage
 
 router = APIRouter()
 
 _pipeline: AssetPipeline = None
 _generator_loaded: bool = False
-_history: list = []
+_storage = FileStorage()
 
 
 def get_pipeline() -> AssetPipeline:
@@ -33,8 +34,13 @@ def set_generator_loaded(loaded: bool) -> None:
     _generator_loaded = loaded
 
 
-def get_history() -> list:
-    return _history
+def get_storage() -> FileStorage:
+    return _storage
+
+
+def set_storage(st: FileStorage) -> None:
+    global _storage
+    _storage = st
 
 
 class GenerateRequest(BaseModel):
@@ -100,12 +106,11 @@ def generate(req: GenerateRequest, background_tasks: BackgroundTasks, pipe: Asse
     pipe.config.pack_sheet = req.num_frames > 1
 
     job_id = str(uuid.uuid4())[:8]
-    output_dir = f"/tmp/sprite_gen/{job_id}"
+    output_dir = _storage.ensure_output_dir(job_id)
 
     result = pipe.run(controls, output_dir=output_dir)
 
-    _history.append({
-        "job_id": job_id,
+    _storage.add_job(job_id, {
         "prompt": result.metadata["prompt"],
         "quality_tier": result.validation[0]["quality_tier"],
         "outputs": result.output_paths,
@@ -138,13 +143,13 @@ def load_model(req: LoadModelRequest):
 
 
 @router.get("/download/{job_id}")
-def download(job_id: str):
-    for entry in _history:
-        if entry["job_id"] == job_id and entry.get("zip_path"):
-            return FileResponse(entry["zip_path"], media_type="application/zip")
+def download(job_id: str, storage: FileStorage = Depends(get_storage)):
+    entry = storage.get_job(job_id)
+    if entry and entry.get("zip_path") and os.path.isfile(entry["zip_path"]):
+        return FileResponse(entry["zip_path"], media_type="application/zip")
     raise HTTPException(status_code=404, detail="Job not found or ZIP not available")
 
 
 @router.get("/history")
-def get_history():
-    return _history
+def list_history(storage: FileStorage = Depends(get_storage)):
+    return storage.list_jobs()

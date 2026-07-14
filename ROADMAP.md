@@ -59,9 +59,9 @@ Download
 - [x] Smoke test with real LoRA weights end-to-end
 
 ### Phase 1 — FastAPI + Next.js
-- [ ] FastAPI backend with /generate, /download, /health, /history
-- [ ] Next.js frontend with Generate, History, Downloads, Settings pages
-- [ ] File-based storage (no DB yet)
+- [x] FastAPI backend with /generate, /download, /health, /history
+- [x] Next.js frontend with Generate, History, Downloads, Settings pages
+- [x] File-based storage (no DB yet)
 - [ ] Rate limiting (per-IP, no auth)
 - [ ] Deploy on HF Spaces or cheap VPS
 
