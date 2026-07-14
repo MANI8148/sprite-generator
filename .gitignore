@@ -22,3 +22,6 @@ kaggle.json
 *.log
 wandb/
 runs/
+
+node_modules/
+.next/
