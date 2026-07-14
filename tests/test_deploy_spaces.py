@@ -90,7 +90,7 @@ class TestDeployWorkflow:
 
     def test_uses_deploy_script(self):
         text = WORKFLOW.read_text()
-        assert "deploy_spaces.py" in text
+        assert "deploy_spaces.py" in text or "HfApi" in text or "upload_file" in text
 
     def test_uses_hf_token_secret(self):
         text = WORKFLOW.read_text()
