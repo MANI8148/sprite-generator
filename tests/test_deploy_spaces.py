@@ -80,13 +80,13 @@ class TestDeployWorkflow:
         assert "push:" in text
         assert "main" in text
 
-    def test_triggers_on_gradio_app_paths(self):
+    def test_triggers_on_demo_paths(self):
         text = WORKFLOW.read_text()
-        assert "gradio_app/" in text or "'gradio_app/**'" in text or "gradio_app/**" in text
+        assert "demo/" in text or "'demo/**'" in text or "demo/**" in text
 
-    def test_triggers_on_backend_paths(self):
+    def test_triggers_on_models_paths(self):
         text = WORKFLOW.read_text()
-        assert "backend/" in text or "'backend/**'" in text or "backend/**" in text
+        assert "models/" in text or "'models/**'" in text or "models/**" in text
 
     def test_uses_deploy_script(self):
         text = WORKFLOW.read_text()

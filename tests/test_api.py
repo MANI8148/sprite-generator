@@ -19,6 +19,7 @@ from backend.api.routes import (
 from backend.modules.pipeline.orchestrator import AssetPipeline, PipelineConfig
 from backend.modules.prompt_builder.controls import AssetControls
 from backend.modules.storage.file_storage import FileStorage
+from backend.modules.rate_limiter import RateLimiter, set_rate_limiter, get_rate_limiter, EXEMPT_PATHS
 from backend.main import app
 
 
@@ -56,6 +57,7 @@ def reset_state():
     set_generator_loaded(False)
     tmp = tempfile.mkdtemp()
     set_storage(FileStorage(base_dir=tmp))
+    set_rate_limiter(RateLimiter(max_requests=100, window_seconds=60))
 
 
 @pytest.fixture
@@ -206,3 +208,47 @@ class TestLoadModel:
     def test_load_model_endpoint_exists(self, client):
         resp = client.post("/load-model", json={})
         assert resp.status_code in (200, 500)
+
+
+class TestRateLimiter:
+    def test_unit_block_when_exceeded(self):
+        limiter = RateLimiter(max_requests=3, window_seconds=60)
+        ip = "192.168.1.1"
+        assert limiter.check(ip) is True
+        assert limiter.check(ip) is True
+        assert limiter.check(ip) is True
+        assert limiter.check(ip) is False
+
+    def test_unit_allows_after_window_expires(self):
+        limiter = RateLimiter(max_requests=1, window_seconds=0)
+        ip = "192.168.1.2"
+        assert limiter.check(ip) is True
+        assert limiter.check(ip) is True
+
+    def test_unit_separate_ips_independent(self):
+        limiter = RateLimiter(max_requests=2, window_seconds=60)
+        assert limiter.check("ip-a") is True
+        assert limiter.check("ip-b") is True
+        assert limiter.check("ip-a") is True
+        assert limiter.check("ip-b") is True
+        assert limiter.check("ip-a") is False
+        assert limiter.check("ip-b") is False
+
+    def test_integration_health_exempt_from_rate_limit(self, client):
+        limiter = RateLimiter(max_requests=2, window_seconds=60)
+        set_rate_limiter(limiter)
+        for _ in range(5):
+            resp = client.get("/health")
+            assert resp.status_code == 200
+
+    def test_integration_generate_blocked_when_rate_exceeded(self, client):
+        limiter = RateLimiter(max_requests=2, window_seconds=60)
+        set_rate_limiter(limiter)
+        resp1 = client.post("/generate", json={"asset_type": "character"})
+        assert resp1.status_code == 200
+        resp2 = client.post("/generate", json={"asset_type": "enemy"})
+        assert resp2.status_code == 200
+        resp3 = client.post("/generate", json={"asset_type": "vehicle"})
+        assert resp3.status_code == 429
+        data = resp3.json()
+        assert "Rate limit exceeded" in data["detail"]
