@@ -2,6 +2,7 @@
 
 import os
 import json
+import time
 import tempfile
 from pathlib import Path
 from typing import List, Optional
@@ -252,6 +253,72 @@ class TestRateLimiter:
         assert resp3.status_code == 429
         data = resp3.json()
         assert "Rate limit exceeded" in data["detail"]
+
+    def test_headers_present_on_success(self, client):
+        limiter = RateLimiter(max_requests=100, window_seconds=60)
+        set_rate_limiter(limiter)
+        resp = client.post("/generate", json={"asset_type": "character"})
+        assert resp.status_code == 200
+        assert "X-RateLimit-Limit" in resp.headers
+        assert "X-RateLimit-Remaining" in resp.headers
+        assert "X-RateLimit-Reset" in resp.headers
+        assert resp.headers["X-RateLimit-Limit"] == "100"
+        assert int(resp.headers["X-RateLimit-Remaining"]) <= 99
+
+    def test_headers_present_on_429(self, client):
+        limiter = RateLimiter(max_requests=1, window_seconds=60)
+        set_rate_limiter(limiter)
+        resp1 = client.post("/generate", json={"asset_type": "character"})
+        assert resp1.status_code == 200
+        resp2 = client.post("/generate", json={"asset_type": "enemy"})
+        assert resp2.status_code == 429
+        assert resp2.headers["X-RateLimit-Remaining"] == "0"
+        assert resp2.headers["X-RateLimit-Limit"] == "1"
+
+    def test_remaining_decrements_correctly(self):
+        limiter = RateLimiter(max_requests=5, window_seconds=60)
+        ip = "10.0.0.1"
+        assert limiter.remaining(ip) == 5
+        limiter.check(ip)
+        assert limiter.remaining(ip) == 4
+        limiter.check(ip)
+        assert limiter.remaining(ip) == 3
+        limiter.check(ip)
+        assert limiter.remaining(ip) == 2
+        limiter.check(ip)
+        assert limiter.remaining(ip) == 1
+        limiter.check(ip)
+        assert limiter.remaining(ip) == 0
+        assert limiter.check(ip) is False
+
+    def test_reset_time_returns_future(self):
+        limiter = RateLimiter(max_requests=1, window_seconds=10)
+        ip = "10.0.0.2"
+        limiter.check(ip)
+        rt = limiter.reset_time(ip)
+        now = time.time()
+        assert rt > now
+        assert rt <= now + 10
+
+    def test_reset_time_when_no_requests(self):
+        limiter = RateLimiter(max_requests=5, window_seconds=60)
+        ip = "10.0.0.3"
+        rt = limiter.reset_time(ip)
+        assert rt <= time.time()
+
+    def test_env_var_configuration(self):
+        os.environ["RATE_LIMIT_MAX_REQUESTS"] = "25"
+        os.environ["RATE_LIMIT_WINDOW_SECONDS"] = "120"
+        limiter = RateLimiter()
+        assert limiter.max_requests == 25
+        assert limiter.window_seconds == 120
+        del os.environ["RATE_LIMIT_MAX_REQUESTS"]
+        del os.environ["RATE_LIMIT_WINDOW_SECONDS"]
+
+    def test_env_var_configuration_fallback(self):
+        limiter = RateLimiter()
+        assert limiter.max_requests == 10
+        assert limiter.window_seconds == 60
 
 
 class TestBatchGenerate:

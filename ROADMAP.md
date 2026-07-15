@@ -62,7 +62,7 @@ Download
 - [x] FastAPI backend with /generate, /download, /health, /history
 - [x] Next.js frontend with Generate, History, Downloads, Settings pages
 - [x] File-based storage (no DB yet)
-- [ ] Rate limiting (per-IP, no auth)
+- [x] Rate limiting (per-IP, no auth)
 - [ ] Deploy on HF Spaces or cheap VPS
 
 ### Phase 2 — Production Hardening
