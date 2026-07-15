@@ -252,3 +252,91 @@ class TestRateLimiter:
         assert resp3.status_code == 429
         data = resp3.json()
         assert "Rate limit exceeded" in data["detail"]
+
+
+class TestBatchGenerate:
+    def test_batch_generate_two_items(self, client):
+        resp = client.post("/generate/batch", json={
+            "items": [
+                {"asset_type": "character", "view": "front"},
+                {"asset_type": "building", "view": "isometric"},
+            ]
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+        assert data["succeeded"] == 2
+        assert data["failed"] == 0
+        assert len(data["results"]) == 2
+        assert data["results"][0]["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline")
+        assert data["results"][1]["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline")
+
+    def test_batch_generate_empty_items(self, client):
+        resp = client.post("/generate/batch", json={"items": []})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 0
+        assert data["succeeded"] == 0
+        assert data["failed"] == 0
+        assert len(data["results"]) == 0
+
+    def test_batch_generate_single_item(self, client):
+        resp = client.post("/generate/batch", json={
+            "items": [
+                {"asset_type": "enemy", "view": "side", "animation": "walk", "num_frames": 4}
+            ]
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["succeeded"] == 1
+        assert len(data["results"]) == 1
+        assert data["results"][0]["job_id"] != ""
+
+    def test_batch_generate_custom_batch_id(self, client):
+        resp = client.post("/generate/batch", json={
+            "batch_id": "my_batch_001",
+            "items": [
+                {"asset_type": "character"},
+            ]
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["batch_id"] == "my_batch_001"
+        assert data["results"][0]["job_id"].startswith("my_batch_001")
+
+    def test_batch_generate_without_loaded_generator_returns_503(self):
+        pipe = AssetPipeline()
+        set_pipeline(pipe)
+        set_generator_loaded(False)
+        tc = TestClient(app)
+
+        resp = tc.post("/generate/batch", json={
+            "items": [{"asset_type": "character"}]
+        })
+        assert resp.status_code == 503
+        assert "Generator not set" in resp.json()["detail"]
+
+    def test_batch_generate_multiple_asset_types(self, client):
+        items = [
+            {"asset_type": t, "view": "front"}
+            for t in ["character", "building", "enemy", "vehicle", "prop"]
+        ]
+        resp = client.post("/generate/batch", json={"items": items})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 5
+        assert data["succeeded"] == 5
+        for r in data["results"]:
+            assert r["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline")
+
+    def test_batch_generate_different_views(self, client):
+        items = [
+            {"asset_type": "character", "view": v}
+            for v in ["front", "side", "isometric", "back"]
+        ]
+        resp = client.post("/generate/batch", json={"items": items})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 4
+        assert data["succeeded"] == 4

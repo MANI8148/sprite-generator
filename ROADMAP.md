@@ -69,7 +69,7 @@ Download
 - [ ] SQLite → PostgreSQL (only when needed)
 - [ ] Background task queue (only when concurrent users > 1)
 - [x] Asset library with persistent storage
-- [ ] Multi-asset batch generation
+- [x] Multi-asset batch generation
 - [ ] Style consistency engine (IP-Adapter, palette lock)
 
 ### Phase 3 — Scale

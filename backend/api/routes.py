@@ -81,6 +81,37 @@ class GenerateResponse(BaseModel):
     output_paths: List[str]
 
 
+class BatchItem(BaseModel):
+    asset_type: str = "character"
+    view: str = "front"
+    animation: str = "idle"
+    palette: str = "auto"
+    sprite_size: str = "32x32"
+    theme: str = ""
+    seed: int = -1
+    num_frames: int = 1
+    remove_bg: bool = True
+    reduce_palette: bool = True
+    max_colors: int = 32
+    pixel_cleanup: bool = True
+    auto_center: bool = True
+    upscale: int = 1
+    engine: str = "godot"
+
+
+class BatchGenerateRequest(BaseModel):
+    items: List[BatchItem]
+    batch_id: Optional[str] = None
+
+
+class BatchGenerateResponse(BaseModel):
+    batch_id: str
+    results: List[GenerateResponse]
+    total: int
+    succeeded: int
+    failed: int
+
+
 class HealthResponse(BaseModel):
     status: str
     generator_loaded: bool
@@ -146,6 +177,80 @@ def generate(req: GenerateRequest, background_tasks: BackgroundTasks, pipe: Asse
         validation=result.validation[0],
         zip_path=result.zip_path,
         output_paths=result.output_paths,
+    )
+
+
+@router.post("/generate/batch", response_model=BatchGenerateResponse)
+def generate_batch(req: BatchGenerateRequest, pipe: AssetPipeline = Depends(get_pipeline)):
+    global _generator_loaded
+    if not _generator_loaded:
+        raise HTTPException(status_code=503, detail="Generator not set. POST /load-model first.")
+
+    batch_id = req.batch_id or str(uuid.uuid4())[:8]
+    results: List[GenerateResponse] = []
+    succeeded = 0
+    failed = 0
+
+    for i, item in enumerate(req.items):
+        try:
+            controls = AssetControls(
+                asset_type=AssetType(item.asset_type),
+                view=View(item.view),
+                animation=Animation(item.animation),
+                palette=Palette(item.palette),
+                sprite_size=SpriteSize(item.sprite_size),
+                theme=item.theme,
+                seed=item.seed,
+            )
+
+            pipe.config.remove_bg = item.remove_bg
+            pipe.config.reduce_palette = item.reduce_palette
+            pipe.config.max_colors = item.max_colors
+            pipe.config.pixel_cleanup = item.pixel_cleanup
+            pipe.config.auto_center = item.auto_center
+            pipe.config.upscale = item.upscale
+            pipe.config.export_engine = item.engine
+            pipe.config.pack_sheet = item.num_frames > 1
+
+            job_id = f"{batch_id}_{i}"
+            output_dir = _storage.ensure_output_dir(job_id)
+
+            result = pipe.run(controls, output_dir=output_dir)
+
+            _storage.add_job(job_id, {
+                "prompt": result.metadata["prompt"],
+                "quality_tier": result.validation[0]["quality_tier"],
+                "outputs": result.output_paths,
+                "zip_path": result.zip_path,
+                "batch_id": batch_id,
+            })
+
+            results.append(GenerateResponse(
+                job_id=job_id,
+                prompt=result.metadata["prompt"],
+                quality_tier=result.validation[0]["quality_tier"],
+                validation=result.validation[0],
+                zip_path=result.zip_path,
+                output_paths=result.output_paths,
+            ))
+            succeeded += 1
+        except Exception as e:
+            failed += 1
+            results.append(GenerateResponse(
+                job_id=f"{batch_id}_{i}",
+                prompt="",
+                quality_tier="error",
+                validation={"error": str(e)},
+                zip_path=None,
+                output_paths=[],
+            ))
+
+    return BatchGenerateResponse(
+        batch_id=batch_id,
+        results=results,
+        total=len(req.items),
+        succeeded=succeeded,
+        failed=failed,
     )
 
 
