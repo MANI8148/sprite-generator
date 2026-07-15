@@ -10,12 +10,14 @@ from backend.modules.prompt_builder.controls import (
 )
 from backend.modules.pipeline.orchestrator import AssetPipeline, PipelineConfig
 from backend.modules.storage.file_storage import FileStorage
+from backend.modules.storage.asset_library import AssetLibrary, AssetRecord
 
 router = APIRouter()
 
 _pipeline: AssetPipeline = None
 _generator_loaded: bool = False
 _storage = FileStorage()
+_library = AssetLibrary()
 
 
 def get_pipeline() -> AssetPipeline:
@@ -41,6 +43,15 @@ def get_storage() -> FileStorage:
 def set_storage(st: FileStorage) -> None:
     global _storage
     _storage = st
+
+
+def get_library() -> AssetLibrary:
+    return _library
+
+
+def set_library(lib: AssetLibrary) -> None:
+    global _library
+    _library = lib
 
 
 class GenerateRequest(BaseModel):
@@ -117,6 +128,17 @@ def generate(req: GenerateRequest, background_tasks: BackgroundTasks, pipe: Asse
         "zip_path": result.zip_path,
     })
 
+    _library.add_asset(AssetRecord(
+        asset_id=job_id,
+        job_id=job_id,
+        asset_type=req.asset_type,
+        prompt=result.metadata["prompt"],
+        quality_tier=result.validation[0]["quality_tier"],
+        zip_path=result.zip_path,
+        output_paths=result.output_paths,
+        metadata={"view": req.view, "animation": req.animation, "palette": req.palette, "sprite_size": req.sprite_size},
+    ))
+
     return GenerateResponse(
         job_id=job_id,
         prompt=result.metadata["prompt"],
@@ -153,3 +175,113 @@ def download(job_id: str, storage: FileStorage = Depends(get_storage)):
 @router.get("/history")
 def list_history(storage: FileStorage = Depends(get_storage)):
     return storage.list_jobs()
+
+
+class LibraryAssetResponse(BaseModel):
+    asset_id: str
+    job_id: str
+    asset_type: str
+    prompt: str
+    quality_tier: str
+    tags: List[str]
+    category: str
+    thumbnail_path: Optional[str]
+    zip_path: Optional[str]
+    output_paths: List[str]
+    created_at: str
+    updated_at: str
+
+
+class LibraryListResponse(BaseModel):
+    assets: List[LibraryAssetResponse]
+    total: int
+
+
+class AddTagsRequest(BaseModel):
+    tags: List[str]
+
+
+class RemoveTagsRequest(BaseModel):
+    tags: List[str]
+
+
+class UpdateAssetRequest(BaseModel):
+    category: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+@router.get("/library", response_model=LibraryListResponse)
+def list_library(
+    asset_type: Optional[str] = None,
+    quality_tier: Optional[str] = None,
+    category: Optional[str] = None,
+    tags: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    library: AssetLibrary = Depends(get_library),
+):
+    tag_list = tags.split(",") if tags else None
+    assets = library.list_assets(
+        asset_type=asset_type,
+        quality_tier=quality_tier,
+        category=category,
+        tags=tag_list,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    total = library.count()
+    return LibraryListResponse(
+        assets=[LibraryAssetResponse(**r.__dict__) for r in assets],
+        total=total,
+    )
+
+
+@router.get("/library/tags")
+def list_library_tags(library: AssetLibrary = Depends(get_library)):
+    return {"tags": library.list_tags()}
+
+
+@router.get("/library/{asset_id}", response_model=LibraryAssetResponse)
+def get_library_asset(asset_id: str, library: AssetLibrary = Depends(get_library)):
+    asset = library.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return LibraryAssetResponse(**asset.__dict__)
+
+
+@router.delete("/library/{asset_id}")
+def delete_library_asset(asset_id: str, library: AssetLibrary = Depends(get_library)):
+    if not library.delete_asset(asset_id):
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return {"status": "deleted", "asset_id": asset_id}
+
+
+@router.patch("/library/{asset_id}", response_model=LibraryAssetResponse)
+def update_library_asset(asset_id: str, req: UpdateAssetRequest, library: AssetLibrary = Depends(get_library)):
+    updates = {}
+    if req.category is not None:
+        updates["category"] = req.category
+    if req.tags is not None:
+        updates["tags"] = req.tags
+    asset = library.update_asset(asset_id, **updates)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return LibraryAssetResponse(**asset.__dict__)
+
+
+@router.post("/library/{asset_id}/tags", response_model=LibraryAssetResponse)
+def add_asset_tags(asset_id: str, req: AddTagsRequest, library: AssetLibrary = Depends(get_library)):
+    asset = library.add_tags(asset_id, req.tags)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return LibraryAssetResponse(**asset.__dict__)
+
+
+@router.delete("/library/{asset_id}/tags", response_model=LibraryAssetResponse)
+def remove_asset_tags(asset_id: str, req: RemoveTagsRequest, library: AssetLibrary = Depends(get_library)):
+    asset = library.remove_tags(asset_id, req.tags)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return LibraryAssetResponse(**asset.__dict__)
