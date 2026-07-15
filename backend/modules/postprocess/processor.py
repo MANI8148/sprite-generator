@@ -3,6 +3,8 @@ import numpy as np
 from io import BytesIO
 from typing import Optional, Tuple
 
+from .palettes import get_palette
+
 
 def to_rgba(image: Image.Image) -> Image.Image:
     if image.mode != "RGBA":
@@ -152,4 +154,24 @@ def outline_cleanup(
     interior_alpha = alpha.copy()
     interior_alpha[~interior] = 0
     arr[:, :, 3] = interior_alpha
+    return Image.fromarray(arr)
+
+
+def palette_lock(
+    image: Image.Image,
+    palette_name: str = "retro_16",
+) -> Image.Image:
+    rgba = to_rgba(image)
+    palette = get_palette(palette_name)
+    palette_arr = np.array(palette, dtype=np.int32)
+    arr = np.array(rgba)
+    alpha = arr[:, :, 3]
+    opaque = alpha > 128
+    if not opaque.any():
+        return rgba
+    pixels = arr[opaque, :3].astype(np.int32)
+    diff = pixels[:, np.newaxis, :] - palette_arr[np.newaxis, :, :]
+    dist = np.sum(diff ** 2, axis=2)
+    nearest = np.argmin(dist, axis=1)
+    arr[opaque, :3] = palette_arr[nearest]
     return Image.fromarray(arr)

@@ -17,6 +17,7 @@ from ..postprocess.processor import (
     normalize,
     upscale,
     outline_cleanup,
+    palette_lock,
 )
 from ..validation.metrics import assess_all
 from ..packing.packer import sprite_sheet, animation_strip, individual_pngs
@@ -36,6 +37,8 @@ class PipelineConfig:
     target_size: tuple = (512, 512)
     upscale: int = 1
     outline_cleanup: bool = False
+    palette_lock: bool = False
+    palette_name: str = "retro_16"
     pack_sheet: bool = True
     export_engine: str = "godot"
     export_zip: bool = True
@@ -105,6 +108,8 @@ class AssetPipeline:
                 p = upscale(p, factor=self.config.upscale)
             if self.config.outline_cleanup:
                 p = outline_cleanup(p)
+            if self.config.palette_lock:
+                p = palette_lock(p, palette_name=self.config.palette_name)
             processed.append(p)
 
         # 4. Validate
@@ -140,6 +145,7 @@ class AssetPipeline:
                 "view": controls.view.value,
                 "animation": controls.animation.value,
                 "palette": controls.palette.value,
+                "palette_name": self.config.palette_name,
                 "sprite_size": controls.sprite_size.value,
                 "theme": controls.theme,
                 "seed": controls.seed,

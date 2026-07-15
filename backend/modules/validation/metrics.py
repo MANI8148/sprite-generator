@@ -97,6 +97,26 @@ def duplicate_detection(images: list) -> int:
     return dupes
 
 
+def palette_consistency(image: Image.Image, palette_name: str = "retro_16") -> float:
+    from ..postprocess.palettes import get_palette
+    target = get_palette(palette_name)
+    palette_arr = np.array(target, dtype=np.int32)
+    rgba = image.convert("RGBA")
+    arr = np.array(rgba)
+    alpha = arr[:, :, 3]
+    opaque = alpha > 128
+    if not opaque.any():
+        return 1.0
+    pixels = arr[opaque, :3].astype(np.int32)
+    min_dist = np.full(pixels.shape[0], np.inf, dtype=np.float64)
+    for c in palette_arr:
+        d = np.sum((pixels.astype(np.float64) - c.astype(np.float64)) ** 2, axis=1)
+        min_dist = np.minimum(min_dist, d)
+    max_dist = 3 * (255 ** 2)
+    scores = 1.0 - np.sqrt(min_dist) / np.sqrt(max_dist)
+    return float(np.mean(scores))
+
+
 def assess_all(image: Image.Image, batch: list = None) -> Dict:
     result = {}
     result["palette_size"] = palette_size(image)
@@ -113,6 +133,7 @@ def assess_all(image: Image.Image, batch: list = None) -> Dict:
     result["transparency_ratio"] = round(transparency_coverage(image), 3)
     result["outline_continuity"] = round(outline_continuity(image), 3)
     result["sharpness"] = round(pixel_sharpness(image), 1)
+    result["palette_consistency"] = round(palette_consistency(image), 3)
     quality = "clean"
     if result["palette_size"] > 128:
         quality = "noisy"
