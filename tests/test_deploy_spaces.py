@@ -70,6 +70,26 @@ class TestDeployScript:
         from scripts.deploy_spaces import main
         assert callable(main)
 
+    def test_collect_files_flatten_gradio_app(self):
+        from scripts.deploy_spaces import collect_files
+        files = collect_files(
+            [Path(__file__).parent.parent / "gradio_app"],
+            flatten_dirs={"gradio_app"},
+        )
+        paths = [repo for _local, repo in files]
+        assert any(p == "app.py" for p in paths), "gradio_app/app.py should flatten to app.py"
+        assert any(p == "README.md" for p in paths), "gradio_app/README.md should flatten to README.md"
+        assert all(not p.startswith("gradio_app/") for p in paths), "No paths should start with gradio_app/"
+
+    def test_collect_files_keeps_backend_paths(self):
+        from scripts.deploy_spaces import collect_files
+        files = collect_files(
+            [Path(__file__).parent.parent / "backend"],
+            flatten_dirs={"gradio_app"},
+        )
+        paths = [repo for _local, repo in files]
+        assert any(p.startswith("backend/") for p in paths), "Backend paths should keep backend/ prefix"
+
 
 class TestDeployWorkflow:
     def test_workflow_exists(self):
@@ -80,13 +100,13 @@ class TestDeployWorkflow:
         assert "push:" in text
         assert "main" in text
 
-    def test_triggers_on_demo_paths(self):
+    def test_triggers_on_gradio_app_paths(self):
         text = WORKFLOW.read_text()
-        assert "demo/" in text or "'demo/**'" in text or "demo/**" in text
+        assert "gradio_app/" in text or "'gradio_app/**'" in text or "gradio_app/**" in text
 
-    def test_triggers_on_models_paths(self):
+    def test_triggers_on_backend_paths(self):
         text = WORKFLOW.read_text()
-        assert "models/" in text or "'models/**'" in text or "models/**" in text
+        assert "backend/" in text or "'backend/**'" in text or "backend/**" in text
 
     def test_uses_deploy_script(self):
         text = WORKFLOW.read_text()

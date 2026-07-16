@@ -7,8 +7,18 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parent.parent
 
 
-def collect_files(source_dirs: list[Path]) -> list[tuple[str, str]]:
-    """Collect (local_path, repo_path) pairs for upload."""
+def collect_files(source_dirs: list[Path], flatten_dirs: set[str] | None = None) -> list[tuple[str, str]]:
+    """Collect (local_path, repo_path) pairs for upload.
+
+    Args:
+        source_dirs: Directories to walk for files.
+        flatten_dirs: Set of source dir names whose repo_path should be
+                      relative to themselves (for HF Spaces app root).
+                      E.g. flatten_dirs={"gradio_app"} means gradio_app/app.py
+                      is uploaded as app.py, not gradio_app/app.py.
+    """
+    if flatten_dirs is None:
+        flatten_dirs = set()
     files = []
     for src_dir in source_dirs:
         if not src_dir.exists():
@@ -18,7 +28,10 @@ def collect_files(source_dirs: list[Path]) -> list[tuple[str, str]]:
             root_path = Path(root)
             for fname in fnames:
                 local_path = root_path / fname
-                repo_path = str(local_path.relative_to(REPO_ROOT))
+                if src_dir.name in flatten_dirs:
+                    repo_path = str(local_path.relative_to(src_dir))
+                else:
+                    repo_path = str(local_path.relative_to(REPO_ROOT))
                 files.append((str(local_path), repo_path))
     return files
 
@@ -28,6 +41,7 @@ def deploy(
     hf_token: str,
     source_dirs: list[Path],
     dry_run: bool = False,
+    flatten_dirs: set[str] | None = None,
 ) -> int:
     """Upload files to HF Spaces. Returns 0 on success, 1 on failure."""
     try:
@@ -36,7 +50,7 @@ def deploy(
         print("Error: huggingface_hub not installed. Run: pip install huggingface_hub", file=sys.stderr)
         return 1
 
-    files = collect_files(source_dirs)
+    files = collect_files(source_dirs, flatten_dirs=flatten_dirs)
     if not files:
         print("Error: no files found to deploy", file=sys.stderr)
         return 1
@@ -80,7 +94,13 @@ def main():
         REPO_ROOT / "backend",
     ]
 
-    return deploy(args.space_repo, args.token, source_dirs, dry_run=args.dry_run)
+    return deploy(
+        args.space_repo,
+        args.token,
+        source_dirs,
+        dry_run=args.dry_run,
+        flatten_dirs={"gradio_app"},
+    )
 
 
 if __name__ == "__main__":
