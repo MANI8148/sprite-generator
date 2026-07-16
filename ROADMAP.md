@@ -74,7 +74,7 @@ Download
 
 ### Phase 3 — Scale
 - [ ] More generator modules (tilesets, environments, UI, props)
-- [ ] More exporters (GameMaker, Phaser)
+- [x] More exporters (GameMaker, Phaser)
 - [ ] Cloud storage (Cloudflare R2)
 - [ ] Incremental regeneration ("asset memory")
 

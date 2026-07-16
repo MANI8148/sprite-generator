@@ -83,14 +83,92 @@ def generic_png(images: List[Image.Image], names: List[str], output_dir: str, at
     return paths
 
 
+def gamemaker(atlas: Image.Image, metadata: dict, output_dir: str) -> List[str]:
+    os.makedirs(output_dir, exist_ok=True)
+    name = metadata.get("name", "sprite")
+    atlas_path = os.path.join(output_dir, f"{name}.png")
+    atlas.save(atlas_path)
+    yy_path = os.path.join(output_dir, f"{name}.yy")
+    frames = metadata.get("frames", [])
+    yy_data = {
+        "$GMSprite": {
+            "name": name,
+            "width": atlas.width,
+            "height": atlas.height,
+            "frames": [
+                {
+                    "frame": i,
+                    "x": f["x"],
+                    "y": f["y"],
+                    "width": f["w"],
+                    "height": f["h"],
+                }
+                for i, f in enumerate(frames)
+            ],
+        }
+    }
+    with open(yy_path, "w") as f:
+        json.dump(yy_data, f, indent=2)
+    return [atlas_path, yy_path]
+
+
+def phaser(atlas: Image.Image, metadata: dict, output_dir: str) -> List[str]:
+    os.makedirs(output_dir, exist_ok=True)
+    name = metadata.get("name", "sprite")
+    atlas_path = os.path.join(output_dir, f"{name}.png")
+    atlas.save(atlas_path)
+    json_path = os.path.join(output_dir, f"{name}.json")
+    frames = metadata.get("frames", [])
+    phaser_frames = {}
+    for i, f in enumerate(frames):
+        key = f"sprite_{name}_{i}"
+        phaser_frames[key] = {
+            "frame": {"x": f["x"], "y": f["y"], "w": f["w"], "h": f["h"]},
+            "rotated": False,
+            "trimmed": False,
+            "spriteSourceSize": {"x": 0, "y": 0, "w": f["w"], "h": f["h"]},
+            "sourceSize": {"w": f["w"], "h": f["h"]},
+        }
+    atlas_data = {
+        "frames": phaser_frames,
+        "meta": {
+            "app": "sprite-generator",
+            "version": "1.0",
+            "image": f"{name}.png",
+            "size": {"w": atlas.width, "h": atlas.height},
+            "scale": "1",
+        },
+    }
+    with open(json_path, "w") as f:
+        json.dump(atlas_data, f, indent=2)
+    return [atlas_path, json_path]
+
+
+def _build_frames(meta: dict) -> list:
+    fw = meta["frame_size"]["w"]
+    fh = meta["frame_size"]["h"]
+    pad = meta["padding"]
+    frames = []
+    for i in range(meta["frame_count"]):
+        x = pad + i * (fw + pad)
+        y = pad
+        frames.append({"index": i, "x": x, "y": y, "w": fw, "h": fh})
+    return frames
+
+
 def export_animation(images: List[Image.Image], output_dir: str, name: str, engine: str = "godot") -> List[str]:
     norm = [normalize(img, target_size=(512, 512)) for img in images]
     strip, meta = animation_strip(norm, direction="horizontal", padding=2)
     meta["name"] = name
+    meta["frames"] = _build_frames(meta)
     if engine == "godot":
         return godot(strip, meta, output_dir)
     elif engine == "unity":
         return unity(strip, meta, output_dir)
+    elif engine == "gamemaker":
+        return gamemaker(strip, meta, output_dir)
+    elif engine == "phaser":
+        return phaser(strip, meta, output_dir)
     else:
         os.makedirs(output_dir, exist_ok=True)
         strip_path = os.path.join(output_dir, f"{name}_strip.png")
