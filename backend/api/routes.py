@@ -12,6 +12,7 @@ from backend.modules.pipeline.orchestrator import AssetPipeline
 from backend.modules.storage.file_storage import FileStorage
 from backend.modules.storage.asset_library import AssetLibrary, AssetRecord
 from backend.modules.tasks.queue import TaskQueue, get_task_queue, JobStatus
+from backend.modules.style_engine import StyleEngine, STYLE_PRESETS
 
 router = APIRouter()
 
@@ -55,6 +56,13 @@ def set_library(lib: AssetLibrary) -> None:
     _library = lib
 
 
+_style_engine = StyleEngine()
+
+
+def get_style_engine() -> StyleEngine:
+    return _style_engine
+
+
 class GenerateResponse(BaseModel):
     job_id: str
     status: str
@@ -87,6 +95,9 @@ class GenerateRequest(BaseModel):
     upscale: int = 1
     engine: str = "godot"
     num_frames: int = 1
+    palette_lock: bool = False
+    palette_name: str = "retro_16"
+    style_preset: str = ""
 
 
 class BatchItem(BaseModel):
@@ -105,6 +116,9 @@ class BatchItem(BaseModel):
     auto_center: bool = True
     upscale: int = 1
     engine: str = "godot"
+    palette_lock: bool = False
+    palette_name: str = "retro_16"
+    style_preset: str = ""
 
 
 class BatchGenerateRequest(BaseModel):
@@ -137,6 +151,37 @@ class HealthResponse(BaseModel):
 @router.get("/health", response_model=HealthResponse)
 def health():
     return HealthResponse(status="ok", generator_loaded=_generator_loaded)
+
+
+class StylePresetResponse(BaseModel):
+    name: str
+    description: str
+    palette_name: str
+    apply_palette_lock: bool
+
+
+@router.get("/style-presets")
+def list_style_presets():
+    return {
+        "presets": [
+            StylePresetResponse(
+                name=p.name,
+                description=p.description,
+                palette_name=p.palette_name,
+                apply_palette_lock=p.apply_palette_lock,
+            )
+            for p in STYLE_PRESETS.values()
+        ]
+    }
+
+
+class PaletteListResponse(BaseModel):
+    palettes: List[str]
+
+
+@router.get("/palettes", response_model=PaletteListResponse)
+def list_palettes(engine: StyleEngine = Depends(get_style_engine)):
+    return PaletteListResponse(palettes=engine.get_available_palettes())
 
 
 def _run_generation_job(pipe, controls, req, output_dir, job_id):
@@ -193,6 +238,13 @@ def generate(req: GenerateRequest, pipe: AssetPipeline = Depends(get_pipeline)):
     pipe.config.upscale = req.upscale
     pipe.config.export_engine = req.engine
     pipe.config.pack_sheet = req.num_frames > 1
+    pipe.config.palette_lock = req.palette_lock
+    pipe.config.palette_name = req.palette_name
+    if req.style_preset:
+        preset = STYLE_PRESETS.get(req.style_preset.lower())
+        if preset:
+            pipe.config.palette_lock = preset.apply_palette_lock
+            pipe.config.palette_name = preset.palette_name
 
     job_id = str(uuid.uuid4())[:8]
     output_dir = _storage.ensure_output_dir(job_id)
@@ -253,6 +305,13 @@ def generate_batch(req: BatchGenerateRequest, pipe: AssetPipeline = Depends(get_
             pipe.config.upscale = item.upscale
             pipe.config.export_engine = item.engine
             pipe.config.pack_sheet = item.num_frames > 1
+            pipe.config.palette_lock = item.palette_lock
+            pipe.config.palette_name = item.palette_name
+            if item.style_preset:
+                preset = STYLE_PRESETS.get(item.style_preset.lower())
+                if preset:
+                    pipe.config.palette_lock = preset.apply_palette_lock
+                    pipe.config.palette_name = preset.palette_name
 
             job_id = f"{batch_id}_{i}"
             output_dir = _storage.ensure_output_dir(job_id)
