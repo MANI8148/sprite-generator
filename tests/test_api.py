@@ -15,12 +15,14 @@ from fastapi.testclient import TestClient
 
 from backend.api.routes import (
     router, set_pipeline, set_generator_loaded,
-    get_pipeline, set_storage, _generator_loaded,
+    get_pipeline, set_storage, set_library, _generator_loaded,
 )
 from backend.modules.pipeline.orchestrator import AssetPipeline, PipelineConfig
 from backend.modules.prompt_builder.controls import AssetControls
 from backend.modules.storage.file_storage import FileStorage
+from backend.modules.storage.asset_library import AssetLibrary
 from backend.modules.rate_limiter import RateLimiter, set_rate_limiter, get_rate_limiter, EXEMPT_PATHS
+from backend.modules.tasks.queue import TaskQueue, set_task_queue, get_task_queue, JobStatus
 from backend.main import app
 
 
@@ -53,12 +55,27 @@ class FakeGenerator:
         return images
 
 
+def poll_job(client, job_id, timeout=10):
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        resp = client.get(f"/status/{job_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        if data["status"] in ("done", "failed"):
+            return data
+        time.sleep(0.01)
+    raise TimeoutError(f"Job {job_id} did not complete within {timeout}s")
+
+
 @pytest.fixture(autouse=True)
 def reset_state():
     set_generator_loaded(False)
     tmp = tempfile.mkdtemp()
     set_storage(FileStorage(base_dir=tmp))
+    set_library(AssetLibrary(base_dir=os.path.join(tmp, "lib")))
     set_rate_limiter(RateLimiter(max_requests=100, window_seconds=60))
+    set_task_queue(TaskQueue(max_workers=4))
 
 
 @pytest.fixture
@@ -98,14 +115,18 @@ class TestGenerate:
             "sprite_size": "32x32",
             "num_frames": 1,
         })
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.json()
         assert "job_id" in data
-        assert data["prompt"] != ""
-        assert "quality_tier" in data
-        assert "validation" in data
-        assert isinstance(data["output_paths"], list)
-        assert len(data["output_paths"]) > 0
+        assert data["status"] == "pending"
+
+        result = poll_job(client, data["job_id"])
+        assert result["status"] == "done"
+        assert result["prompt"] != ""
+        assert "quality_tier" in result
+        assert "validation" in result
+        assert isinstance(result["output_paths"], list)
+        assert len(result["output_paths"]) > 0
 
     def test_generate_with_multiple_frames(self, client):
         pipe = AssetPipeline()
@@ -120,9 +141,11 @@ class TestGenerate:
             "animation": "walk",
             "num_frames": 4,
         })
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.json()
-        assert len(data["output_paths"]) > 0
+        result = poll_job(tc, data["job_id"])
+        assert result["status"] == "done"
+        assert len(result["output_paths"]) > 0
 
     def test_generate_without_loaded_generator_returns_503(self):
         pipe = AssetPipeline()
@@ -140,9 +163,11 @@ class TestGenerate:
                 "asset_type": asset_type,
                 "view": "front",
             })
-            assert resp.status_code == 200, f"Failed for asset_type={asset_type}"
+            assert resp.status_code == 202, f"Failed for asset_type={asset_type}"
             data = resp.json()
-            assert data["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline")
+            result = poll_job(client, data["job_id"])
+            assert result["status"] == "done"
+            assert result["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline")
 
     def test_generate_metadata_includes_controls(self, client):
         resp = client.post("/generate", json={
@@ -150,17 +175,20 @@ class TestGenerate:
             "view": "isometric",
             "palette": "retro_16",
         })
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.json()
-        assert "validation" in data
-        assert "output_paths" in data
+        result = poll_job(client, data["job_id"])
+        assert result["status"] == "done"
+        assert "validation" in result
+        assert "output_paths" in result
 
 
 class TestDownload:
     def test_download_existing_job_returns_zip(self, client):
         resp = client.post("/generate", json={"asset_type": "character"})
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         job_id = resp.json()["job_id"]
+        poll_job(client, job_id)
 
         resp = client.get(f"/download/{job_id}")
         assert resp.status_code == 200
@@ -180,8 +208,13 @@ class TestHistory:
         assert len(resp.json()) == 0
 
     def test_history_records_generation(self, client):
-        client.post("/generate", json={"asset_type": "character"})
-        client.post("/generate", json={"asset_type": "enemy"})
+        r1 = client.post("/generate", json={"asset_type": "character"})
+        assert r1.status_code == 202
+        poll_job(client, r1.json()["job_id"])
+
+        r2 = client.post("/generate", json={"asset_type": "enemy"})
+        assert r2.status_code == 202
+        poll_job(client, r2.json()["job_id"])
 
         resp = client.get("/history")
         data = resp.json()
@@ -195,11 +228,17 @@ class TestHistory:
         resp = client.get("/history")
         assert len(resp.json()) == 0
 
-        client.post("/generate", json={"asset_type": "character"})
+        r1 = client.post("/generate", json={"asset_type": "character"})
+        assert r1.status_code == 202
+        poll_job(client, r1.json()["job_id"])
+
         resp = client.get("/history")
         assert len(resp.json()) == 1
 
-        client.post("/generate", json={"asset_type": "vehicle"})
+        r2 = client.post("/generate", json={"asset_type": "vehicle"})
+        assert r2.status_code == 202
+        poll_job(client, r2.json()["job_id"])
+
         resp = client.get("/history")
         assert len(resp.json()) == 2
 
@@ -246,9 +285,9 @@ class TestRateLimiter:
         limiter = RateLimiter(max_requests=2, window_seconds=60)
         set_rate_limiter(limiter)
         resp1 = client.post("/generate", json={"asset_type": "character"})
-        assert resp1.status_code == 200
+        assert resp1.status_code == 202
         resp2 = client.post("/generate", json={"asset_type": "enemy"})
-        assert resp2.status_code == 200
+        assert resp2.status_code == 202
         resp3 = client.post("/generate", json={"asset_type": "vehicle"})
         assert resp3.status_code == 429
         data = resp3.json()
@@ -258,7 +297,7 @@ class TestRateLimiter:
         limiter = RateLimiter(max_requests=100, window_seconds=60)
         set_rate_limiter(limiter)
         resp = client.post("/generate", json={"asset_type": "character"})
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         assert "X-RateLimit-Limit" in resp.headers
         assert "X-RateLimit-Remaining" in resp.headers
         assert "X-RateLimit-Reset" in resp.headers
@@ -269,7 +308,7 @@ class TestRateLimiter:
         limiter = RateLimiter(max_requests=1, window_seconds=60)
         set_rate_limiter(limiter)
         resp1 = client.post("/generate", json={"asset_type": "character"})
-        assert resp1.status_code == 200
+        assert resp1.status_code == 202
         resp2 = client.post("/generate", json={"asset_type": "enemy"})
         assert resp2.status_code == 429
         assert resp2.headers["X-RateLimit-Remaining"] == "0"

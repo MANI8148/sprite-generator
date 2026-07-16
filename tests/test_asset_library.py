@@ -12,6 +12,7 @@ from backend.api.routes import set_library, set_pipeline, set_generator_loaded, 
 from backend.modules.pipeline.orchestrator import AssetPipeline
 from backend.modules.storage.file_storage import FileStorage
 from backend.modules.rate_limiter import RateLimiter, set_rate_limiter
+from backend.modules.tasks.queue import TaskQueue, set_task_queue
 from backend.main import app
 
 
@@ -29,6 +30,19 @@ class FakeGenerator:
         return images
 
 
+def poll_job(client, job_id, timeout=10):
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        resp = client.get(f"/status/{job_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        if data["status"] in ("done", "failed"):
+            return data
+        time.sleep(0.01)
+    raise TimeoutError(f"Job {job_id} did not complete within {timeout}s")
+
+
 @pytest.fixture(autouse=True)
 def reset_state():
     tmp = tempfile.mkdtemp()
@@ -37,6 +51,7 @@ def reset_state():
     set_pipeline(AssetPipeline())
     set_generator_loaded(True)
     set_rate_limiter(RateLimiter(max_requests=100, window_seconds=60))
+    set_task_queue(TaskQueue(max_workers=4))
 
 
 @pytest.fixture
@@ -320,8 +335,9 @@ class TestLibraryAPI:
 
     def test_library_populates_on_generate(self, client):
         resp = client.post("/generate", json={"asset_type": "character", "view": "front"})
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         job_id = resp.json()["job_id"]
+        poll_job(client, job_id)
 
         resp = client.get("/library")
         data = resp.json()
@@ -336,7 +352,9 @@ class TestLibraryAPI:
         set_generator_loaded(True)
 
         for at in ["character", "vehicle", "enemy"]:
-            client.post("/generate", json={"asset_type": at, "view": "front"})
+            r = client.post("/generate", json={"asset_type": at, "view": "front"})
+            assert r.status_code == 202
+            poll_job(client, r.json()["job_id"])
 
         resp = client.get("/library?asset_type=character")
         data = resp.json()
@@ -344,7 +362,9 @@ class TestLibraryAPI:
 
     def test_library_get_asset(self, client):
         resp = client.post("/generate", json={"asset_type": "building"})
+        assert resp.status_code == 202
         job_id = resp.json()["job_id"]
+        poll_job(client, job_id)
 
         resp = client.get(f"/library/{job_id}")
         assert resp.status_code == 200
@@ -358,7 +378,9 @@ class TestLibraryAPI:
 
     def test_library_delete_asset(self, client):
         resp = client.post("/generate", json={"asset_type": "prop"})
+        assert resp.status_code == 202
         job_id = resp.json()["job_id"]
+        poll_job(client, job_id)
 
         resp = client.delete(f"/library/{job_id}")
         assert resp.status_code == 200
@@ -373,7 +395,9 @@ class TestLibraryAPI:
 
     def test_library_update_asset(self, client):
         resp = client.post("/generate", json={"asset_type": "character"})
+        assert resp.status_code == 202
         job_id = resp.json()["job_id"]
+        poll_job(client, job_id)
 
         resp = client.patch(f"/library/{job_id}", json={"category": "heroes", "tags": ["fantasy", "knight"]})
         assert resp.status_code == 200
@@ -388,7 +412,9 @@ class TestLibraryAPI:
 
     def test_library_add_tags(self, client):
         resp = client.post("/generate", json={"asset_type": "enemy"})
+        assert resp.status_code == 202
         job_id = resp.json()["job_id"]
+        poll_job(client, job_id)
 
         resp = client.post(f"/library/{job_id}/tags", json={"tags": ["boss", "dragon"]})
         assert resp.status_code == 200
@@ -398,7 +424,9 @@ class TestLibraryAPI:
 
     def test_library_remove_tags(self, client):
         resp = client.post("/generate", json={"asset_type": "enemy"})
+        assert resp.status_code == 202
         job_id = resp.json()["job_id"]
+        poll_job(client, job_id)
 
         client.post(f"/library/{job_id}/tags", json={"tags": ["boss", "dragon", "rare"]})
         resp = client.request("DELETE", f"/library/{job_id}/tags", json={"tags": ["dragon"]})
@@ -414,7 +442,9 @@ class TestLibraryAPI:
         set_generator_loaded(True)
 
         resp = client.post("/generate", json={"asset_type": "character"})
+        assert resp.status_code == 202
         job_id = resp.json()["job_id"]
+        poll_job(client, job_id)
 
         client.post(f"/library/{job_id}/tags", json={"tags": ["fantasy", "warrior"]})
 
@@ -431,8 +461,31 @@ class TestLibraryAPI:
         set_generator_loaded(True)
 
         resp = client.post("/generate", json={"asset_type": "character", "theme": "dragon"})
+        assert resp.status_code == 202
         job_id = resp.json()["job_id"]
+        poll_job(client, job_id)
 
         resp = client.get("/library?search=dragon")
         data = resp.json()
         assert data["total"] >= 1
+
+    def test_status_endpoint_returns_job_status(self, client):
+        resp = client.post("/generate", json={"asset_type": "character"})
+        assert resp.status_code == 202
+        job_id = resp.json()["job_id"]
+
+        status_resp = client.get(f"/status/{job_id}")
+        assert status_resp.status_code == 200
+        data = status_resp.json()
+        assert data["job_id"] == job_id
+        assert data["status"] in ("pending", "running", "done", "failed")
+
+    def test_status_endpoint_nonexistent_returns_404(self, client):
+        resp = client.get("/status/nonexistent")
+        assert resp.status_code == 404
+
+    def test_generate_returns_pending_status(self, client):
+        resp = client.post("/generate", json={"asset_type": "character"})
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["status"] == "pending"

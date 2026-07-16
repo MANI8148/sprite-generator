@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, List
@@ -8,9 +8,10 @@ import uuid
 from backend.modules.prompt_builder.controls import (
     AssetControls, AssetType, View, Palette, Animation, SpriteSize,
 )
-from backend.modules.pipeline.orchestrator import AssetPipeline, PipelineConfig
+from backend.modules.pipeline.orchestrator import AssetPipeline
 from backend.modules.storage.file_storage import FileStorage
 from backend.modules.storage.asset_library import AssetLibrary, AssetRecord
+from backend.modules.tasks.queue import TaskQueue, get_task_queue, JobStatus
 
 router = APIRouter()
 
@@ -54,6 +55,22 @@ def set_library(lib: AssetLibrary) -> None:
     _library = lib
 
 
+class GenerateResponse(BaseModel):
+    job_id: str
+    status: str
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    prompt: Optional[str] = None
+    quality_tier: Optional[str] = None
+    validation: Optional[dict] = None
+    zip_path: Optional[str] = None
+    output_paths: Optional[List[str]] = None
+    error: Optional[str] = None
+
+
 class GenerateRequest(BaseModel):
     asset_type: str = "character"
     view: str = "front"
@@ -70,15 +87,6 @@ class GenerateRequest(BaseModel):
     upscale: int = 1
     engine: str = "godot"
     num_frames: int = 1
-
-
-class GenerateResponse(BaseModel):
-    job_id: str
-    prompt: str
-    quality_tier: str
-    validation: dict
-    zip_path: Optional[str]
-    output_paths: List[str]
 
 
 class BatchItem(BaseModel):
@@ -104,9 +112,18 @@ class BatchGenerateRequest(BaseModel):
     batch_id: Optional[str] = None
 
 
+class BatchResult(BaseModel):
+    job_id: str
+    prompt: str
+    quality_tier: str
+    validation: dict
+    zip_path: Optional[str]
+    output_paths: List[str]
+
+
 class BatchGenerateResponse(BaseModel):
     batch_id: str
-    results: List[GenerateResponse]
+    results: List[BatchResult]
     total: int
     succeeded: int
     failed: int
@@ -122,8 +139,38 @@ def health():
     return HealthResponse(status="ok", generator_loaded=_generator_loaded)
 
 
-@router.post("/generate", response_model=GenerateResponse)
-def generate(req: GenerateRequest, background_tasks: BackgroundTasks, pipe: AssetPipeline = Depends(get_pipeline)):
+def _run_generation_job(pipe, controls, req, output_dir, job_id):
+    result = pipe.run(controls, output_dir=output_dir)
+
+    _storage.add_job(job_id, {
+        "prompt": result.metadata["prompt"],
+        "quality_tier": result.validation[0]["quality_tier"],
+        "outputs": result.output_paths,
+        "zip_path": result.zip_path,
+    })
+
+    _library.add_asset(AssetRecord(
+        asset_id=job_id,
+        job_id=job_id,
+        asset_type=req.asset_type,
+        prompt=result.metadata["prompt"],
+        quality_tier=result.validation[0]["quality_tier"],
+        zip_path=result.zip_path,
+        output_paths=result.output_paths,
+        metadata={"view": req.view, "animation": req.animation, "palette": req.palette, "sprite_size": req.sprite_size},
+    ))
+
+    return {
+        "prompt": result.metadata["prompt"],
+        "quality_tier": result.validation[0]["quality_tier"],
+        "validation": result.validation[0],
+        "zip_path": result.zip_path,
+        "output_paths": result.output_paths,
+    }
+
+
+@router.post("/generate", response_model=GenerateResponse, status_code=202)
+def generate(req: GenerateRequest, pipe: AssetPipeline = Depends(get_pipeline)):
     global _generator_loaded
     if not _generator_loaded:
         raise HTTPException(status_code=503, detail="Generator not set. POST /load-model first.")
@@ -150,34 +197,29 @@ def generate(req: GenerateRequest, background_tasks: BackgroundTasks, pipe: Asse
     job_id = str(uuid.uuid4())[:8]
     output_dir = _storage.ensure_output_dir(job_id)
 
-    result = pipe.run(controls, output_dir=output_dir)
+    queue = get_task_queue()
+    queue.submit(_run_generation_job, job_id, pipe, controls, req, output_dir, job_id)
 
-    _storage.add_job(job_id, {
-        "prompt": result.metadata["prompt"],
-        "quality_tier": result.validation[0]["quality_tier"],
-        "outputs": result.output_paths,
-        "zip_path": result.zip_path,
-    })
+    return GenerateResponse(job_id=job_id, status=JobStatus.PENDING)
 
-    _library.add_asset(AssetRecord(
-        asset_id=job_id,
-        job_id=job_id,
-        asset_type=req.asset_type,
-        prompt=result.metadata["prompt"],
-        quality_tier=result.validation[0]["quality_tier"],
-        zip_path=result.zip_path,
-        output_paths=result.output_paths,
-        metadata={"view": req.view, "animation": req.animation, "palette": req.palette, "sprite_size": req.sprite_size},
-    ))
 
-    return GenerateResponse(
-        job_id=job_id,
-        prompt=result.metadata["prompt"],
-        quality_tier=result.validation[0]["quality_tier"],
-        validation=result.validation[0],
-        zip_path=result.zip_path,
-        output_paths=result.output_paths,
-    )
+@router.get("/status/{job_id}", response_model=JobStatusResponse)
+def get_job_status(job_id: str):
+    queue = get_task_queue()
+    job = queue.get_status(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    resp = JobStatusResponse(job_id=job_id, status=job["status"].value)
+    if job["result"] is not None:
+        resp.prompt = job["result"].get("prompt")
+        resp.quality_tier = job["result"].get("quality_tier")
+        resp.validation = job["result"].get("validation")
+        resp.zip_path = job["result"].get("zip_path")
+        resp.output_paths = job["result"].get("output_paths")
+    if job["error"] is not None:
+        resp.error = job["error"]
+    return resp
 
 
 @router.post("/generate/batch", response_model=BatchGenerateResponse)
@@ -187,7 +229,7 @@ def generate_batch(req: BatchGenerateRequest, pipe: AssetPipeline = Depends(get_
         raise HTTPException(status_code=503, detail="Generator not set. POST /load-model first.")
 
     batch_id = req.batch_id or str(uuid.uuid4())[:8]
-    results: List[GenerateResponse] = []
+    results: List[BatchResult] = []
     succeeded = 0
     failed = 0
 
@@ -225,7 +267,7 @@ def generate_batch(req: BatchGenerateRequest, pipe: AssetPipeline = Depends(get_
                 "batch_id": batch_id,
             })
 
-            results.append(GenerateResponse(
+            results.append(BatchResult(
                 job_id=job_id,
                 prompt=result.metadata["prompt"],
                 quality_tier=result.validation[0]["quality_tier"],
@@ -236,7 +278,7 @@ def generate_batch(req: BatchGenerateRequest, pipe: AssetPipeline = Depends(get_
             succeeded += 1
         except Exception as e:
             failed += 1
-            results.append(GenerateResponse(
+            results.append(BatchResult(
                 job_id=f"{batch_id}_{i}",
                 prompt="",
                 quality_tier="error",
