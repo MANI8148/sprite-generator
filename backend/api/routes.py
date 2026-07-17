@@ -20,6 +20,7 @@ _pipeline: AssetPipeline = None
 _generator_loaded: bool = False
 _storage = FileStorage()
 _library = AssetLibrary()
+_batch_jobs: dict[str, list[str]] = {}
 
 
 def get_pipeline() -> AssetPipeline:
@@ -137,10 +138,20 @@ class BatchResult(BaseModel):
 
 class BatchGenerateResponse(BaseModel):
     batch_id: str
-    results: List[BatchResult]
+    job_ids: List[str]
     total: int
-    succeeded: int
+    status: str = "pending"
+
+
+class BatchStatusResponse(BaseModel):
+    batch_id: str
+    total: int
+    completed: int
     failed: int
+    running: int
+    pending: int
+    status: str
+    results: List[BatchResult] = []
 
 
 class HealthResponse(BaseModel):
@@ -274,84 +285,142 @@ def get_job_status(job_id: str):
     return resp
 
 
-@router.post("/generate/batch", response_model=BatchGenerateResponse)
+@router.post("/generate/batch", response_model=BatchGenerateResponse, status_code=202)
 def generate_batch(req: BatchGenerateRequest, pipe: AssetPipeline = Depends(get_pipeline)):
-    global _generator_loaded
+    global _generator_loaded, _batch_jobs
     if not _generator_loaded:
         raise HTTPException(status_code=503, detail="Generator not set. POST /load-model first.")
 
     batch_id = req.batch_id or str(uuid.uuid4())[:8]
-    results: List[BatchResult] = []
-    succeeded = 0
-    failed = 0
+    job_ids: List[str] = []
 
     for i, item in enumerate(req.items):
-        try:
-            controls = AssetControls(
-                asset_type=AssetType(item.asset_type),
-                view=View(item.view),
-                animation=Animation(item.animation),
-                palette=Palette(item.palette),
-                sprite_size=SpriteSize(item.sprite_size),
-                theme=item.theme,
-                seed=item.seed,
-            )
+        job_id = f"{batch_id}_{i}"
+        job_ids.append(job_id)
+        output_dir = _storage.ensure_output_dir(job_id)
 
-            pipe.config.remove_bg = item.remove_bg
-            pipe.config.reduce_palette = item.reduce_palette
-            pipe.config.max_colors = item.max_colors
-            pipe.config.pixel_cleanup = item.pixel_cleanup
-            pipe.config.auto_center = item.auto_center
-            pipe.config.upscale = item.upscale
-            pipe.config.export_engine = item.engine
-            pipe.config.pack_sheet = item.num_frames > 1
-            pipe.config.palette_lock = item.palette_lock
-            pipe.config.palette_name = item.palette_name
-            if item.style_preset:
-                preset = STYLE_PRESETS.get(item.style_preset.lower())
-                if preset:
-                    pipe.config.palette_lock = preset.apply_palette_lock
-                    pipe.config.palette_name = preset.palette_name
+        queue = get_task_queue()
+        queue.submit(_run_batch_item, job_id, pipe, item, output_dir, batch_id)
 
-            job_id = f"{batch_id}_{i}"
-            output_dir = _storage.ensure_output_dir(job_id)
-
-            result = pipe.run(controls, output_dir=output_dir)
-
-            _storage.add_job(job_id, {
-                "prompt": result.metadata["prompt"],
-                "quality_tier": result.validation[0]["quality_tier"],
-                "outputs": result.output_paths,
-                "zip_path": result.zip_path,
-                "batch_id": batch_id,
-            })
-
-            results.append(BatchResult(
-                job_id=job_id,
-                prompt=result.metadata["prompt"],
-                quality_tier=result.validation[0]["quality_tier"],
-                validation=result.validation[0],
-                zip_path=result.zip_path,
-                output_paths=result.output_paths,
-            ))
-            succeeded += 1
-        except Exception as e:
-            failed += 1
-            results.append(BatchResult(
-                job_id=f"{batch_id}_{i}",
-                prompt="",
-                quality_tier="error",
-                validation={"error": str(e)},
-                zip_path=None,
-                output_paths=[],
-            ))
+    _batch_jobs[batch_id] = job_ids
 
     return BatchGenerateResponse(
         batch_id=batch_id,
-        results=results,
+        job_ids=job_ids,
         total=len(req.items),
-        succeeded=succeeded,
+        status="pending",
+    )
+
+
+def _run_batch_item(pipe, item, output_dir, batch_id):
+    controls = AssetControls(
+        asset_type=AssetType(item.asset_type),
+        view=View(item.view),
+        animation=Animation(item.animation),
+        palette=Palette(item.palette),
+        sprite_size=SpriteSize(item.sprite_size),
+        theme=item.theme,
+        seed=item.seed,
+    )
+
+    pipe.config.remove_bg = item.remove_bg
+    pipe.config.reduce_palette = item.reduce_palette
+    pipe.config.max_colors = item.max_colors
+    pipe.config.pixel_cleanup = item.pixel_cleanup
+    pipe.config.auto_center = item.auto_center
+    pipe.config.upscale = item.upscale
+    pipe.config.export_engine = item.engine
+    pipe.config.pack_sheet = item.num_frames > 1
+    pipe.config.palette_lock = item.palette_lock
+    pipe.config.palette_name = item.palette_name
+    if item.style_preset:
+        preset = STYLE_PRESETS.get(item.style_preset.lower())
+        if preset:
+            pipe.config.palette_lock = preset.apply_palette_lock
+            pipe.config.palette_name = preset.palette_name
+
+    result = pipe.run(controls, output_dir=output_dir)
+    job_id = os.path.basename(output_dir.rstrip("/\\"))
+
+    _storage.add_job(job_id, {
+        "prompt": result.metadata["prompt"],
+        "quality_tier": result.validation[0]["quality_tier"],
+        "outputs": result.output_paths,
+        "zip_path": result.zip_path,
+        "batch_id": batch_id,
+    })
+
+    return {
+        "prompt": result.metadata["prompt"],
+        "quality_tier": result.validation[0]["quality_tier"],
+        "validation": result.validation[0],
+        "zip_path": result.zip_path,
+        "output_paths": result.output_paths,
+    }
+
+
+@router.get("/batch-status/{batch_id}", response_model=BatchStatusResponse)
+def get_batch_status(batch_id: str):
+    global _batch_jobs
+    if batch_id not in _batch_jobs:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    job_ids = _batch_jobs[batch_id]
+    queue = get_task_queue()
+    results: List[BatchResult] = []
+    completed = 0
+    failed = 0
+    running = 0
+    pending = 0
+
+    for job_id in job_ids:
+        job = queue.get_status(job_id)
+        if job is None:
+            pending += 1
+        elif job["status"] == JobStatus.DONE:
+            completed += 1
+            if job["result"] is not None:
+                results.append(BatchResult(
+                    job_id=job_id,
+                    prompt=job["result"].get("prompt", ""),
+                    quality_tier=job["result"].get("quality_tier", ""),
+                    validation=job["result"].get("validation", {}),
+                    zip_path=job["result"].get("zip_path"),
+                    output_paths=job["result"].get("output_paths", []),
+                ))
+        elif job["status"] == JobStatus.FAILED:
+            failed += 1
+            results.append(BatchResult(
+                job_id=job_id,
+                prompt="",
+                quality_tier="error",
+                validation={"error": job.get("error", "unknown")},
+                zip_path=None,
+                output_paths=[],
+            ))
+        elif job["status"] == JobStatus.RUNNING:
+            running += 1
+        else:
+            pending += 1
+
+    total = len(job_ids)
+    done_count = completed + failed
+    if done_count == total:
+        batch_status = "done"
+    elif failed > 0:
+        batch_status = "partial_failure"
+    else:
+        batch_status = "running"
+
+    return BatchStatusResponse(
+        batch_id=batch_id,
+        total=total,
+        completed=completed,
         failed=failed,
+        running=running,
+        pending=pending,
+        status=batch_status,
+        results=results,
     )
 
 

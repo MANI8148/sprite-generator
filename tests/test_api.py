@@ -360,6 +360,18 @@ class TestRateLimiter:
         assert limiter.window_seconds == 60
 
 
+def poll_batch(client, batch_id, timeout=30):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        resp = client.get(f"/batch-status/{batch_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        if data["status"] in ("done", "partial_failure"):
+            return data
+        time.sleep(0.05)
+    raise TimeoutError(f"Batch {batch_id} did not complete within {timeout}s")
+
+
 class TestBatchGenerate:
     def test_batch_generate_two_items(self, client):
         resp = client.post("/generate/batch", json={
@@ -368,23 +380,28 @@ class TestBatchGenerate:
                 {"asset_type": "building", "view": "isometric"},
             ]
         })
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.json()
         assert data["total"] == 2
-        assert data["succeeded"] == 2
-        assert data["failed"] == 0
-        assert len(data["results"]) == 2
-        assert data["results"][0]["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline")
-        assert data["results"][1]["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline")
+        assert data["status"] == "pending"
+        assert len(data["job_ids"]) == 2
+        assert data["batch_id"] != ""
+
+        result = poll_batch(client, data["batch_id"])
+        assert result["total"] == 2
+        assert result["completed"] == 2
+        assert result["failed"] == 0
+        assert len(result["results"]) == 2
+        assert result["results"][0]["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline")
+        assert result["results"][1]["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline")
 
     def test_batch_generate_empty_items(self, client):
         resp = client.post("/generate/batch", json={"items": []})
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.json()
         assert data["total"] == 0
-        assert data["succeeded"] == 0
-        assert data["failed"] == 0
-        assert len(data["results"]) == 0
+        assert len(data["job_ids"]) == 0
+        assert data["status"] == "pending"
 
     def test_batch_generate_single_item(self, client):
         resp = client.post("/generate/batch", json={
@@ -392,12 +409,14 @@ class TestBatchGenerate:
                 {"asset_type": "enemy", "view": "side", "animation": "walk", "num_frames": 4}
             ]
         })
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.json()
         assert data["total"] == 1
-        assert data["succeeded"] == 1
-        assert len(data["results"]) == 1
-        assert data["results"][0]["job_id"] != ""
+        assert len(data["job_ids"]) == 1
+        assert data["job_ids"][0] != ""
+
+        result = poll_batch(client, data["batch_id"])
+        assert result["completed"] == 1
 
     def test_batch_generate_custom_batch_id(self, client):
         resp = client.post("/generate/batch", json={
@@ -406,10 +425,10 @@ class TestBatchGenerate:
                 {"asset_type": "character"},
             ]
         })
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.json()
         assert data["batch_id"] == "my_batch_001"
-        assert data["results"][0]["job_id"].startswith("my_batch_001")
+        assert data["job_ids"][0].startswith("my_batch_001")
 
     def test_batch_generate_without_loaded_generator_returns_503(self):
         pipe = AssetPipeline()
@@ -429,11 +448,14 @@ class TestBatchGenerate:
             for t in ["character", "building", "enemy", "vehicle", "prop"]
         ]
         resp = client.post("/generate/batch", json={"items": items})
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.json()
         assert data["total"] == 5
-        assert data["succeeded"] == 5
-        for r in data["results"]:
+        assert len(data["job_ids"]) == 5
+
+        result = poll_batch(client, data["batch_id"])
+        assert result["completed"] == 5
+        for r in result["results"]:
             assert r["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline")
 
     def test_batch_generate_different_views(self, client):
@@ -442,7 +464,15 @@ class TestBatchGenerate:
             for v in ["front", "side", "isometric", "back"]
         ]
         resp = client.post("/generate/batch", json={"items": items})
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         data = resp.json()
         assert data["total"] == 4
-        assert data["succeeded"] == 4
+        assert len(data["job_ids"]) == 4
+
+        result = poll_batch(client, data["batch_id"])
+        assert result["completed"] == 4
+
+    def test_batch_status_nonexistent_returns_404(self, client):
+        resp = client.get("/batch-status/nonexistent_batch")
+        assert resp.status_code == 404
+        assert "not found" in resp.json()["detail"].lower()

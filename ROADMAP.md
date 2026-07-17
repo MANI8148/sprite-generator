@@ -67,7 +67,7 @@ Download
 
 ### Phase 2 — Production Hardening
 - [x] SQLite → PostgreSQL (only when needed)
-- [ ] Background task queue (only when concurrent users > 1)
+- [x] Background task queue (only when concurrent users > 1)
 - [x] Asset library with persistent storage
 - [x] Multi-asset batch generation
 - [ ] Style consistency engine (IP-Adapter, palette lock)
