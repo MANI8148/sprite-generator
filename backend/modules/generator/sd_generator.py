@@ -3,8 +3,10 @@ import torch
 from typing import Optional, List
 from PIL import Image
 
+from .base import BaseGenerator
 
-class SDGenerator:
+
+class SDGenerator(BaseGenerator):
     def __init__(
         self,
         model_id: str = "runwayml/stable-diffusion-v1-5",

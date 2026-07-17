@@ -73,7 +73,7 @@ Download
 - [ ] Style consistency engine (IP-Adapter, palette lock)
 
 ### Phase 3 — Scale
-- [ ] More generator modules (tilesets, environments, UI, props)
+- [x] More generator modules (tilesets, environments, UI, props)
 - [x] More exporters (GameMaker, Phaser)
 - [ ] Cloud storage (Cloudflare R2)
 - [ ] Incremental regeneration ("asset memory")
