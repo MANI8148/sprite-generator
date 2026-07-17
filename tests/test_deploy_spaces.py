@@ -110,7 +110,7 @@ class TestDeployWorkflow:
 
     def test_uses_deploy_script(self):
         text = WORKFLOW.read_text()
-        assert "deploy_spaces.py" in text or "HfApi" in text or "upload_file" in text
+        assert "deploy_spaces.py" in text
 
     def test_uses_hf_token_secret(self):
         text = WORKFLOW.read_text()
@@ -130,4 +130,8 @@ class TestDeployWorkflow:
 
     def test_sets_hf_space_repo(self):
         text = WORKFLOW.read_text()
-        assert "HF_SPACE_REPO" in text or "space_repo" in text or "sprite-generator-demo" in text
+        script_text = DEPLOY_SCRIPT.read_text()
+        assert (
+            "sprite-generator-demo" in script_text
+            or "HF_SPACE_REPO" in text
+        )

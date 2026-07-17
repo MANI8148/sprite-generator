@@ -63,7 +63,7 @@ Download
 - [x] Next.js frontend with Generate, History, Downloads, Settings pages
 - [x] File-based storage (no DB yet)
 - [x] Rate limiting (per-IP, no auth)
-- [ ] Deploy on HF Spaces or cheap VPS
+- [x] Deploy on HF Spaces or cheap VPS
 
 ### Phase 2 — Production Hardening
 - [x] SQLite → PostgreSQL (only when needed)
