@@ -239,6 +239,233 @@ class TestApplyReferenceStyle:
         assert np.array_equal(np.array(images[0]), original)
 
 
+class TestStyleEngineColorStatistics:
+    def test_color_statistics_normal(self):
+        engine = StyleEngine()
+        img = _make_test_image()
+        stats = engine.color_statistics(img)
+        assert "mean_r" in stats
+        assert "std_r" in stats
+        assert "num_colors" in stats
+        assert "colorfulness" in stats
+        assert stats["num_colors"] > 0
+
+    def test_color_statistics_fully_transparent(self):
+        engine = StyleEngine()
+        arr = np.zeros((16, 16, 4), dtype=np.uint8)
+        img = Image.fromarray(arr)
+        stats = engine.color_statistics(img)
+        assert stats["num_colors"] == 0
+        assert stats["mean_r"] == 0.0
+
+    def test_color_statistics_single_color(self):
+        engine = StyleEngine()
+        arr = np.zeros((16, 16, 4), dtype=np.uint8)
+        arr[:, :, :3] = [100, 150, 200]
+        arr[:, :, 3] = 255
+        img = Image.fromarray(arr)
+        stats = engine.color_statistics(img)
+        assert stats["num_colors"] == 1
+        assert stats["mean_r"] == 100.0
+
+
+class TestStyleEngineCrossImageAgreement:
+    def test_single_image(self):
+        engine = StyleEngine()
+        img = _make_test_image()
+        score = engine.cross_image_palette_agreement([img])
+        assert score == 1.0
+
+    def test_two_identical_images(self):
+        engine = StyleEngine()
+        img = _make_test_image()
+        score = engine.cross_image_palette_agreement([img, img])
+        assert score > 0.0
+
+    def test_two_different_palettes(self):
+        engine = StyleEngine()
+        img1 = _make_test_image()
+        locked = engine.apply_palette_lock(img1, "gameboy")
+        img2 = _make_test_image()
+        score = engine.cross_image_palette_agreement([locked, img2])
+        assert isinstance(score, float)
+        assert 0.0 <= score <= 1.0
+
+    def test_empty_list(self):
+        engine = StyleEngine()
+        score = engine.cross_image_palette_agreement([])
+        assert score == 1.0
+
+
+class TestStyleEngineStyleSimilarity:
+    def test_identical_images(self):
+        engine = StyleEngine()
+        img = _make_test_image()
+        sim = engine.compute_style_similarity([img, img])
+        assert sim > 0.99
+
+    def test_different_images(self):
+        engine = StyleEngine()
+        img1 = _make_test_image()
+        arr = np.zeros((32, 32, 4), dtype=np.uint8)
+        arr[4:28, 4:28, :3] = [255, 0, 0]
+        arr[4:28, 4:28, 3] = 255
+        img2 = Image.fromarray(arr)
+        sim = engine.compute_style_similarity([img1, img2])
+        assert isinstance(sim, float)
+        assert 0.0 <= sim <= 1.0
+
+    def test_single_image(self):
+        engine = StyleEngine()
+        img = _make_test_image()
+        sim = engine.compute_style_similarity([img])
+        assert sim == 1.0
+
+    def test_empty_list(self):
+        engine = StyleEngine()
+        sim = engine.compute_style_similarity([])
+        assert sim == 1.0
+
+
+class TestBatchConsistencyScore:
+    def test_batch_consistency_empty(self):
+        engine = StyleEngine()
+        result = engine.batch_consistency_score([])
+        assert result["overall"] == 1.0
+
+    def test_batch_consistency_single(self):
+        engine = StyleEngine()
+        img = _make_test_image()
+        result = engine.batch_consistency_score([img])
+        assert "mean_consistency" in result
+        assert "overall" in result
+        assert result["overall"] > 0.0
+
+    def test_batch_consistency_with_palette_name(self):
+        engine = StyleEngine()
+        locked = engine.apply_palette_lock(_make_test_image(), "gameboy")
+        result = engine.batch_consistency_score([locked, locked], palette_name="gameboy")
+        assert result["mean_consistency"] > 0.95
+
+    def test_batch_consistency_returns_all_keys(self):
+        engine = StyleEngine()
+        img = _make_test_image()
+        result = engine.batch_consistency_score([img])
+        assert set(result.keys()) == {"mean_consistency", "std_consistency",
+                                       "palette_agreement", "style_similarity", "overall"}
+
+
+class TestExtractBatchPalette:
+    def test_extract_batch_palette_empty(self):
+        engine = StyleEngine()
+        palette = engine.extract_batch_palette([])
+        assert len(palette) > 0
+
+    def test_extract_batch_palette_single_image(self):
+        engine = StyleEngine()
+        img = _make_test_image()
+        palette = engine.extract_batch_palette([img], num_colors=8)
+        assert len(palette) <= 8
+        assert all(len(c) == 3 for c in palette)
+
+    def test_extract_batch_palette_multiple_images(self):
+        engine = StyleEngine()
+        img1 = _make_test_image()
+        img2 = engine.apply_palette_lock(_make_test_image(), "gameboy")
+        palette = engine.extract_batch_palette([img1, img2], num_colors=16)
+        assert len(palette) <= 16
+
+    def test_extract_batch_palette_fully_transparent(self):
+        engine = StyleEngine()
+        arr = np.zeros((16, 16, 4), dtype=np.uint8)
+        img = Image.fromarray(arr)
+        palette = engine.extract_batch_palette([img], num_colors=8)
+        assert len(palette) > 0
+
+
+class TestHarmonizeBatch:
+    def test_harmonize_batch_empty(self):
+        engine = StyleEngine()
+        result = engine.harmonize_batch([])
+        assert result == []
+
+    def test_harmonize_batch_single(self):
+        engine = StyleEngine()
+        img = _make_test_image()
+        result = engine.harmonize_batch([img], palette_name="gameboy")
+        assert len(result) == 1
+        arr = np.array(result[0])
+        opaque = arr[:, :, 3] > 128
+        colors = set(tuple(c) for c in arr[opaque][:, :3])
+        assert colors.issubset(set(KNOWN_PALETTES["gameboy"]))
+
+    def test_harmonize_batch_multiple_all_same_palette(self):
+        engine = StyleEngine()
+        imgs = [_make_test_image(), _make_test_image()]
+        result = engine.harmonize_batch(imgs, palette_name="retro_8")
+        assert len(result) == 2
+        for img in result:
+            arr = np.array(img)
+            opaque = arr[:, :, 3] > 128
+            colors = set(tuple(c) for c in arr[opaque][:, :3])
+            assert colors.issubset(set(KNOWN_PALETTES["retro_8"]))
+
+    def test_harmonize_batch_preserves_transparency(self):
+        engine = StyleEngine()
+        imgs = [_make_test_image()]
+        orig_alpha = np.array(imgs[0])[:, :, 3].copy()
+        result = engine.harmonize_batch(imgs, palette_name="monochrome")
+        assert np.array_equal(np.array(result[0])[:, :, 3], orig_alpha)
+
+
+class TestApplyReferenceColorTransfer:
+    def test_transfer_empty(self):
+        engine = StyleEngine()
+        ref = Image.new("RGB", (32, 32), (100, 150, 200))
+        result = engine.apply_reference_color_transfer([], ref)
+        assert result == []
+
+    def test_transfer_single(self):
+        engine = StyleEngine()
+        ref = Image.new("RGB", (32, 32), (200, 100, 50))
+        img = _make_test_image()
+        result = engine.apply_reference_color_transfer([img], ref, strength=1.0)
+        assert len(result) == 1
+        assert result[0].mode == "RGBA"
+        assert result[0].size == img.size
+
+    def test_transfer_with_zero_strength(self):
+        engine = StyleEngine()
+        ref = Image.new("RGB", (32, 32), (200, 100, 50))
+        img = _make_test_image()
+        original = np.array(img)
+        result = engine.apply_reference_color_transfer([img], ref, strength=0.0)
+        assert np.array_equal(np.array(result[0]), original)
+
+    def test_transfer_multiple_images(self):
+        engine = StyleEngine()
+        ref = Image.new("RGB", (32, 32), (200, 100, 50))
+        imgs = [_make_test_image(), _make_test_image()]
+        result = engine.apply_reference_color_transfer(imgs, ref, strength=0.5)
+        assert len(result) == 2
+
+    def test_transfer_preserves_transparency(self):
+        engine = StyleEngine()
+        ref = Image.new("RGB", (32, 32), (200, 100, 50))
+        img = _make_test_image()
+        orig_alpha = np.array(img)[:, :, 3].copy()
+        result = engine.apply_reference_color_transfer([img], ref, strength=0.5)
+        assert np.array_equal(np.array(result[0])[:, :, 3], orig_alpha)
+
+    def test_transfer_fully_transparent(self):
+        engine = StyleEngine()
+        ref = Image.new("RGB", (32, 32), (200, 100, 50))
+        arr = np.zeros((16, 16, 4), dtype=np.uint8)
+        img = Image.fromarray(arr)
+        result = engine.apply_reference_color_transfer([img], ref)
+        assert np.array_equal(np.array(result[0]), np.array(img))
+
+
 class TestPipelineWithStyleEngine:
     def test_pipeline_palette_lock_true(self, tmp_path):
         config = PipelineConfig(palette_lock=True, palette_name="gameboy")
