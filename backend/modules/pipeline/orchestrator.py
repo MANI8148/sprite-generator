@@ -39,6 +39,9 @@ class PipelineConfig:
     outline_cleanup: bool = False
     palette_lock: bool = False
     palette_name: str = "retro_16"
+    ip_adapter: bool = False
+    ip_adapter_scale: float = 0.6
+    reference_image: Optional[str] = None
     pack_sheet: bool = True
     export_engine: str = "godot"
     export_zip: bool = True
@@ -80,13 +83,21 @@ class AssetPipeline:
         # 2. Generate
         if self.generator is None:
             raise RuntimeError("Generator not set. Call set_generator() first.")
-        images = self.generator.generate(
+
+        gen_kwargs = dict(
             prompt=prompt,
             negative_prompt=neg_prompt,
             width=gen_size,
             height=gen_size,
             seed=controls.seed,
         )
+        if self.config.ip_adapter and self.config.reference_image:
+            try:
+                ref_img = Image.open(self.config.reference_image).convert("RGB")
+                gen_kwargs["ip_adapter_image"] = ref_img
+            except Exception:
+                pass
+        images = self.generator.generate(**gen_kwargs)
 
         # 3. Post-process each image
         processed = []
@@ -146,6 +157,8 @@ class AssetPipeline:
                 "animation": controls.animation.value,
                 "palette": controls.palette.value,
                 "palette_name": self.config.palette_name,
+                "ip_adapter": self.config.ip_adapter,
+                "ip_adapter_scale": self.config.ip_adapter_scale,
                 "sprite_size": controls.sprite_size.value,
                 "theme": controls.theme,
                 "seed": controls.seed,

@@ -1,7 +1,10 @@
 from PIL import Image
-from typing import List, Tuple, Optional, Dict, Set
+from typing import List, Tuple, Optional, Dict, Set, TYPE_CHECKING
 from dataclasses import dataclass
 import numpy as np
+
+if TYPE_CHECKING:
+    from ..generator.base import BaseGenerator
 
 from ..postprocess.processor import palette_lock as _palette_lock
 from ..postprocess.palettes import KNOWN_PALETTES, get_palette
@@ -299,3 +302,46 @@ class StyleEngine:
             arr[opaque_mask, :3] = blended
             result.append(Image.fromarray(arr.astype(np.uint8), "RGBA"))
         return result
+
+    def generate_with_ip_adapter(
+        self,
+        prompt: str,
+        reference_image: Image.Image,
+        generator: Optional["BaseGenerator"] = None,
+        num_images: int = 4,
+        ip_adapter_scale: float = 0.6,
+        seed: int = -1,
+    ) -> List[Image.Image]:
+        from ..generator.ip_adapter_generator import IPAdapterGenerator
+        gen = generator or IPAdapterGenerator(ip_adapter_scale=ip_adapter_scale)
+        if gen.pipe is None:
+            gen.load()
+        return gen.generate(
+            prompt=prompt,
+            ip_adapter_image=reference_image,
+            seed=seed,
+            num_images=num_images,
+        )
+
+    def generate_ip_adapter_consistent_batch(
+        self,
+        prompts: List[str],
+        reference_image: Image.Image,
+        generator: Optional["BaseGenerator"] = None,
+        ip_adapter_scale: float = 0.6,
+        seed: int = -1,
+    ) -> List[List[Image.Image]]:
+        from ..generator.ip_adapter_generator import IPAdapterGenerator
+        gen = generator or IPAdapterGenerator(ip_adapter_scale=ip_adapter_scale)
+        if gen.pipe is None:
+            gen.load()
+        results = []
+        for prompt in prompts:
+            images = gen.generate(
+                prompt=prompt,
+                ip_adapter_image=reference_image,
+                seed=seed,
+                num_images=1,
+            )
+            results.append(images)
+        return results

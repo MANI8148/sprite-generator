@@ -70,7 +70,7 @@ Download
 - [x] Background task queue (only when concurrent users > 1)
 - [x] Asset library with persistent storage
 - [x] Multi-asset batch generation
-- [ ] Style consistency engine (IP-Adapter, palette lock)
+- [x] Style consistency engine (IP-Adapter, palette lock)
 
 ### Phase 3 — Scale
 - [x] More generator modules (tilesets, environments, UI, props)

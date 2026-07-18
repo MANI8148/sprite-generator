@@ -4,6 +4,7 @@ from .sd_generator import SDGenerator
 from .tileset_generator import TilesetGenerator
 from .environment_generator import EnvironmentGenerator
 from .prop_generator import PropGenerator
+from .ip_adapter_generator import IPAdapterGenerator
 
 
 _generator_classes: Dict[str, Type[BaseGenerator]] = {
@@ -11,6 +12,7 @@ _generator_classes: Dict[str, Type[BaseGenerator]] = {
     "tileset": TilesetGenerator,
     "environment": EnvironmentGenerator,
     "prop": PropGenerator,
+    "ip_adapter": IPAdapterGenerator,
 }
 
 
