@@ -12,3 +12,4 @@ scipy>=1.10.0
 imagehash>=4.3.0
 diffusers>=0.21.0
 peft>=0.6.0
+boto3>=1.28.0

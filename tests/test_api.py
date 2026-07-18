@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from backend.api.routes import (
     router, set_pipeline, set_generator_loaded,
     get_pipeline, set_storage, set_library, _generator_loaded,
+    _batch_jobs,
 )
 from backend.modules.pipeline.orchestrator import AssetPipeline, PipelineConfig
 from backend.modules.prompt_builder.controls import AssetControls
@@ -76,6 +77,7 @@ def reset_state():
     set_library(AssetLibrary(base_dir=os.path.join(tmp, "lib")))
     set_rate_limiter(RateLimiter(max_requests=100, window_seconds=60))
     set_task_queue(TaskQueue(max_workers=4))
+    _batch_jobs.clear()
 
 
 @pytest.fixture

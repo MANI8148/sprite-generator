@@ -196,7 +196,30 @@ def list_palettes(engine: StyleEngine = Depends(get_style_engine)):
 
 
 def _run_generation_job(pipe, controls, req, output_dir, job_id):
-    result = pipe.run(controls, output_dir=output_dir)
+    original_config = pipe.config
+    from copy import deepcopy
+    config = deepcopy(pipe.config)
+    config.remove_bg = req.remove_bg
+    config.reduce_palette = req.reduce_palette
+    config.max_colors = req.max_colors
+    config.pixel_cleanup = req.pixel_cleanup
+    config.auto_center = req.auto_center
+    config.upscale = req.upscale
+    config.export_engine = req.engine
+    config.pack_sheet = req.num_frames > 1
+    config.palette_lock = req.palette_lock
+    config.palette_name = req.palette_name
+    if req.style_preset:
+        preset = STYLE_PRESETS.get(req.style_preset.lower())
+        if preset:
+            config.palette_lock = preset.apply_palette_lock
+            config.palette_name = preset.palette_name
+    pipe.config = config
+
+    try:
+        result = pipe.run(controls, output_dir=output_dir)
+    finally:
+        pipe.config = original_config
 
     _storage.add_job(job_id, {
         "prompt": result.metadata["prompt"],
@@ -240,22 +263,6 @@ def generate(req: GenerateRequest, pipe: AssetPipeline = Depends(get_pipeline)):
         theme=req.theme,
         seed=req.seed,
     )
-
-    pipe.config.remove_bg = req.remove_bg
-    pipe.config.reduce_palette = req.reduce_palette
-    pipe.config.max_colors = req.max_colors
-    pipe.config.pixel_cleanup = req.pixel_cleanup
-    pipe.config.auto_center = req.auto_center
-    pipe.config.upscale = req.upscale
-    pipe.config.export_engine = req.engine
-    pipe.config.pack_sheet = req.num_frames > 1
-    pipe.config.palette_lock = req.palette_lock
-    pipe.config.palette_name = req.palette_name
-    if req.style_preset:
-        preset = STYLE_PRESETS.get(req.style_preset.lower())
-        if preset:
-            pipe.config.palette_lock = preset.apply_palette_lock
-            pipe.config.palette_name = preset.palette_name
 
     job_id = str(uuid.uuid4())[:8]
     output_dir = _storage.ensure_output_dir(job_id)
@@ -323,23 +330,30 @@ def _run_batch_item(pipe, item, output_dir, batch_id):
         seed=item.seed,
     )
 
-    pipe.config.remove_bg = item.remove_bg
-    pipe.config.reduce_palette = item.reduce_palette
-    pipe.config.max_colors = item.max_colors
-    pipe.config.pixel_cleanup = item.pixel_cleanup
-    pipe.config.auto_center = item.auto_center
-    pipe.config.upscale = item.upscale
-    pipe.config.export_engine = item.engine
-    pipe.config.pack_sheet = item.num_frames > 1
-    pipe.config.palette_lock = item.palette_lock
-    pipe.config.palette_name = item.palette_name
+    original_config = pipe.config
+    from copy import deepcopy
+    config = deepcopy(pipe.config)
+    config.remove_bg = item.remove_bg
+    config.reduce_palette = item.reduce_palette
+    config.max_colors = item.max_colors
+    config.pixel_cleanup = item.pixel_cleanup
+    config.auto_center = item.auto_center
+    config.upscale = item.upscale
+    config.export_engine = item.engine
+    config.pack_sheet = item.num_frames > 1
+    config.palette_lock = item.palette_lock
+    config.palette_name = item.palette_name
     if item.style_preset:
         preset = STYLE_PRESETS.get(item.style_preset.lower())
         if preset:
-            pipe.config.palette_lock = preset.apply_palette_lock
-            pipe.config.palette_name = preset.palette_name
+            config.palette_lock = preset.apply_palette_lock
+            config.palette_name = preset.palette_name
+    pipe.config = config
 
-    result = pipe.run(controls, output_dir=output_dir)
+    try:
+        result = pipe.run(controls, output_dir=output_dir)
+    finally:
+        pipe.config = original_config
     job_id = os.path.basename(output_dir.rstrip("/\\"))
 
     _storage.add_job(job_id, {
