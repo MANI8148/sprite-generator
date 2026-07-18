@@ -10,6 +10,7 @@ from backend.modules.prompt_builder.controls import (
 )
 from backend.modules.pipeline.orchestrator import AssetPipeline
 from backend.modules.storage.file_storage import FileStorage
+from backend.modules.storage.r2_storage import R2Storage
 from backend.modules.storage.asset_library import AssetLibrary, AssetRecord
 from backend.modules.tasks.queue import TaskQueue, get_task_queue, JobStatus
 from backend.modules.style_engine import StyleEngine, STYLE_PRESETS
@@ -21,6 +22,7 @@ _generator_loaded: bool = False
 _storage = FileStorage()
 _library = AssetLibrary()
 _batch_jobs: dict[str, list[str]] = {}
+_r2_storage: R2Storage = R2Storage()
 
 
 def get_pipeline() -> AssetPipeline:
@@ -62,6 +64,15 @@ _style_engine = StyleEngine()
 
 def get_style_engine() -> StyleEngine:
     return _style_engine
+
+
+def get_r2_storage() -> R2Storage:
+    return _r2_storage
+
+
+def set_r2_storage(st: R2Storage) -> None:
+    global _r2_storage
+    _r2_storage = st
 
 
 class GenerateResponse(BaseModel):
@@ -195,6 +206,32 @@ def list_palettes(engine: StyleEngine = Depends(get_style_engine)):
     return PaletteListResponse(palettes=engine.get_available_palettes())
 
 
+class R2StatusResponse(BaseModel):
+    available: bool
+    bucket: str = ""
+    endpoint: str = ""
+
+
+@router.get("/storage/r2-status", response_model=R2StatusResponse)
+def r2_status(r2: R2Storage = Depends(get_r2_storage)):
+    return R2StatusResponse(
+        available=r2.available,
+        bucket=r2._bucket_name if hasattr(r2, '_bucket_name') else "",
+        endpoint=r2._endpoint if hasattr(r2, '_endpoint') else "",
+    )
+
+
+def _upload_to_r2(storage: R2Storage, job_id: str, output_paths: list, zip_path: Optional[str] = None):
+    if not storage.available:
+        return
+    for path in output_paths:
+        if os.path.isfile(path):
+            rel = os.path.relpath(path, os.path.dirname(output_paths[0]) if output_paths else ".")
+            storage.upload_file(path, f"jobs/{job_id}/{rel}")
+    if zip_path and os.path.isfile(zip_path):
+        storage.upload_file(zip_path, f"jobs/{job_id}/sprite_package.zip")
+
+
 def _run_generation_job(pipe, controls, req, output_dir, job_id):
     original_config = pipe.config
     from copy import deepcopy
@@ -227,6 +264,8 @@ def _run_generation_job(pipe, controls, req, output_dir, job_id):
         "outputs": result.output_paths,
         "zip_path": result.zip_path,
     })
+
+    _upload_to_r2(_r2_storage, job_id, result.output_paths, result.zip_path)
 
     _library.add_asset(AssetRecord(
         asset_id=job_id,
@@ -355,6 +394,8 @@ def _run_batch_item(pipe, item, output_dir, batch_id):
     finally:
         pipe.config = original_config
     job_id = os.path.basename(output_dir.rstrip("/\\"))
+
+    _upload_to_r2(_r2_storage, job_id, result.output_paths, result.zip_path)
 
     _storage.add_job(job_id, {
         "prompt": result.metadata["prompt"],
