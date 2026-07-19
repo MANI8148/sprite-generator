@@ -41,7 +41,10 @@ class AssetLibrary:
 
     def _ensure_dirs(self):
         with self._lock:
-            os.makedirs(self.base_dir, exist_ok=True)
+            self._ensure_dirs_unlocked()
+
+    def _ensure_dirs_unlocked(self):
+        os.makedirs(self.base_dir, exist_ok=True)
 
     def _load_index(self) -> dict:
         if not os.path.isfile(self._index_path):
@@ -200,4 +203,4 @@ class AssetLibrary:
         with self._lock:
             if os.path.isdir(self.base_dir):
                 shutil.rmtree(self.base_dir)
-            self._ensure_dirs()
+            self._ensure_dirs_unlocked()
