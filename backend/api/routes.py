@@ -14,6 +14,7 @@ from backend.modules.storage.r2_storage import R2Storage
 from backend.modules.storage.asset_library import AssetLibrary, AssetRecord
 from backend.modules.tasks.queue import TaskQueue, get_task_queue, JobStatus
 from backend.modules.style_engine import StyleEngine, STYLE_PRESETS
+from backend.modules.asset_memory import compute_generation_hash
 
 router = APIRouter()
 
@@ -253,6 +254,27 @@ def _run_generation_job(pipe, controls, req, output_dir, job_id):
             config.palette_name = preset.palette_name
     pipe.config = config
 
+    gen_hash = compute_generation_hash(controls, config)
+
+    cached = _library.find_by_generation_hash(gen_hash)
+    if cached is not None:
+        result = {
+            "prompt": cached.prompt,
+            "quality_tier": cached.quality_tier,
+            "validation": cached.metadata.get("validation", {}),
+            "zip_path": cached.zip_path,
+            "output_paths": cached.output_paths,
+            "cached": True,
+        }
+        _storage.add_job(job_id, {
+            "prompt": cached.prompt,
+            "quality_tier": cached.quality_tier,
+            "outputs": cached.output_paths,
+            "zip_path": cached.zip_path,
+            "cached": True,
+        })
+        return result
+
     try:
         result = pipe.run(controls, output_dir=output_dir)
     finally:
@@ -267,6 +289,10 @@ def _run_generation_job(pipe, controls, req, output_dir, job_id):
 
     _upload_to_r2(_r2_storage, job_id, result.output_paths, result.zip_path)
 
+    meta = {"view": req.view, "animation": req.animation, "palette": req.palette, "sprite_size": req.sprite_size}
+    meta["generation_hash"] = gen_hash
+    meta["validation"] = result.validation[0] if result.validation else {}
+
     _library.add_asset(AssetRecord(
         asset_id=job_id,
         job_id=job_id,
@@ -275,7 +301,8 @@ def _run_generation_job(pipe, controls, req, output_dir, job_id):
         quality_tier=result.validation[0]["quality_tier"],
         zip_path=result.zip_path,
         output_paths=result.output_paths,
-        metadata={"view": req.view, "animation": req.animation, "palette": req.palette, "sprite_size": req.sprite_size},
+        metadata=meta,
+        generation_hash=gen_hash,
     ))
 
     return {
@@ -389,6 +416,27 @@ def _run_batch_item(pipe, item, output_dir, batch_id):
             config.palette_name = preset.palette_name
     pipe.config = config
 
+    gen_hash = compute_generation_hash(controls, config)
+
+    cached = _library.find_by_generation_hash(gen_hash)
+    if cached is not None:
+        job_id = os.path.basename(output_dir.rstrip("/\\"))
+        _storage.add_job(job_id, {
+            "prompt": cached.prompt,
+            "quality_tier": cached.quality_tier,
+            "outputs": cached.output_paths,
+            "zip_path": cached.zip_path,
+            "batch_id": batch_id,
+            "cached": True,
+        })
+        return {
+            "prompt": cached.prompt,
+            "quality_tier": cached.quality_tier,
+            "validation": cached.metadata.get("validation", {}),
+            "zip_path": cached.zip_path,
+            "output_paths": cached.output_paths,
+        }
+
     try:
         result = pipe.run(controls, output_dir=output_dir)
     finally:
@@ -404,6 +452,22 @@ def _run_batch_item(pipe, item, output_dir, batch_id):
         "zip_path": result.zip_path,
         "batch_id": batch_id,
     })
+
+    meta = {"view": item.view, "animation": item.animation, "palette": item.palette, "sprite_size": item.sprite_size}
+    meta["generation_hash"] = gen_hash
+    meta["validation"] = result.validation[0] if result.validation else {}
+
+    _library.add_asset(AssetRecord(
+        asset_id=job_id,
+        job_id=job_id,
+        asset_type=item.asset_type,
+        prompt=result.metadata["prompt"],
+        quality_tier=result.validation[0]["quality_tier"],
+        zip_path=result.zip_path,
+        output_paths=result.output_paths,
+        metadata=meta,
+        generation_hash=gen_hash,
+    ))
 
     return {
         "prompt": result.metadata["prompt"],

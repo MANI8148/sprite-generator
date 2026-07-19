@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import threading
 from typing import Optional
 
 
@@ -8,6 +9,7 @@ class FileStorage:
     def __init__(self, base_dir: str = "data/storage"):
         self.base_dir = base_dir
         self._history_path = os.path.join(base_dir, "history.json")
+        self._lock = threading.Lock()
         self._ensure_dirs()
 
     def _ensure_dirs(self):
@@ -24,19 +26,22 @@ class FileStorage:
             json.dump(history, f, indent=2)
 
     def add_job(self, job_id: str, entry: dict):
-        history = self._load_history()
-        entry["job_id"] = job_id
-        history.append(entry)
-        self._save_history(history)
+        with self._lock:
+            history = self._load_history()
+            entry["job_id"] = job_id
+            history.append(entry)
+            self._save_history(history)
 
     def get_job(self, job_id: str) -> Optional[dict]:
-        for entry in self._load_history():
-            if entry["job_id"] == job_id:
-                return entry
+        with self._lock:
+            for entry in self._load_history():
+                if entry["job_id"] == job_id:
+                    return entry
         return None
 
     def list_jobs(self) -> list:
-        return self._load_history()
+        with self._lock:
+            return self._load_history()
 
     def get_output_dir(self, job_id: str) -> str:
         return os.path.join(self.base_dir, job_id)
@@ -47,6 +52,7 @@ class FileStorage:
         return d
 
     def clear(self):
-        if os.path.isdir(self.base_dir):
-            shutil.rmtree(self.base_dir)
-        self._ensure_dirs()
+        with self._lock:
+            if os.path.isdir(self.base_dir):
+                shutil.rmtree(self.base_dir)
+            self._ensure_dirs()

@@ -34,7 +34,8 @@ class DatabaseLibrary:
                         output_paths TEXT DEFAULT '[]',
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL,
-                        metadata TEXT DEFAULT '{}'
+                        metadata TEXT DEFAULT '{}',
+                        generation_hash TEXT DEFAULT ''
                     )
                 """)
                 conn.execute("""
@@ -42,6 +43,10 @@ class DatabaseLibrary:
                         tag TEXT PRIMARY KEY
                     )
                 """)
+                try:
+                    conn.execute("ALTER TABLE assets ADD COLUMN generation_hash TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass
                 conn.commit()
             finally:
                 conn.close()
@@ -61,6 +66,7 @@ class DatabaseLibrary:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             metadata=json.loads(row["metadata"]),
+            generation_hash=row["generation_hash"] if "generation_hash" in row.keys() else "",
         )
 
     def add_asset(self, record: AssetRecord) -> str:
@@ -79,8 +85,8 @@ class DatabaseLibrary:
                     """INSERT OR REPLACE INTO assets
                        (asset_id, job_id, asset_type, prompt, quality_tier,
                         tags, category, thumbnail_path, zip_path, output_paths,
-                        created_at, updated_at, metadata)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        created_at, updated_at, metadata, generation_hash)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         record.asset_id, record.job_id, record.asset_type,
                         record.prompt, record.quality_tier,
@@ -89,6 +95,7 @@ class DatabaseLibrary:
                         json.dumps(record.output_paths),
                         record.created_at, record.updated_at,
                         json.dumps(record.metadata),
+                        record.generation_hash,
                     ),
                 )
                 for tag in record.tags:
@@ -220,6 +227,26 @@ class DatabaseLibrary:
             try:
                 cursor = conn.execute("SELECT COUNT(*) FROM assets")
                 return cursor.fetchone()[0]
+            finally:
+                conn.close()
+
+    def find_by_generation_hash(self, generation_hash: str) -> Optional[AssetRecord]:
+        with self._lock:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute(
+                    "SELECT * FROM assets WHERE generation_hash = ? LIMIT 1",
+                    (generation_hash,),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    cursor = conn.execute(
+                        "SELECT * FROM assets WHERE json_extract(metadata, '$.generation_hash') = ? LIMIT 1",
+                        (generation_hash,),
+                    )
+                    row = cursor.fetchone()
+                return self._row_to_record(row) if row else None
             finally:
                 conn.close()
 
