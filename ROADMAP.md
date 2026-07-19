@@ -80,7 +80,7 @@ Download
 
 ## Explicitly Deferred
 - ❌ Billing / payments
-- ❌ Authentication / user accounts
+- [x] Authentication / user accounts
 - ❌ LLM Project Director
 - ❌ Celery / Redis / DAG orchestrator
 - ❌ Multi-user team features

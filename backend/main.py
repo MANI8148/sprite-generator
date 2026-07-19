@@ -2,11 +2,13 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS
 from backend.api.routes import router, set_pipeline
+from backend.api.auth_routes import router as auth_router
 from backend.modules.pipeline.orchestrator import AssetPipeline
 from backend.modules.rate_limiter import get_rate_limiter, EXEMPT_PATHS
 
 app = FastAPI(title="AI Game Asset Pipeline API")
 app.include_router(router)
+app.include_router(auth_router)
 
 set_pipeline(AssetPipeline())
 
