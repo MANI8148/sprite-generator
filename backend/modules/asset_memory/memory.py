@@ -29,6 +29,7 @@ def compute_generation_hash(
             "normalize_size": config.normalize_size,
             "target_size": list(config.target_size),
             "upscale": config.upscale,
+            "use_realesrgan": config.use_realesrgan,
             "outline_cleanup": config.outline_cleanup,
             "palette_lock": config.palette_lock,
             "palette_name": config.palette_name,

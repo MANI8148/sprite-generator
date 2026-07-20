@@ -84,6 +84,6 @@ Download
 - ❌ LLM Project Director
 - ❌ Celery / Redis / DAG orchestrator
 - ❌ Multi-user team features
-- ❌ Real-ESRGAN upscaling
+- [x] Real-ESRGAN upscaling
 
 Until the MVP is validated with real users.

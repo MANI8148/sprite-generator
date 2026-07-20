@@ -134,6 +134,24 @@ def upscale(
     return image.resize((w * factor, h * factor), resample)
 
 
+def realesrgan_upscale(
+    image: Image.Image,
+    factor: int = 4,
+    fallback_method: str = "lanczos",
+) -> Image.Image:
+    if factor <= 1:
+        return image
+    try:
+        from .realesrgan_upscaler import upscale_with_realesrgan, is_available
+        if is_available() or upscale_with_realesrgan(image, scale=factor):
+            result = upscale_with_realesrgan(image, scale=factor)
+            if result is not None and result.size != image.size:
+                return result
+    except Exception:
+        pass
+    return upscale(image, factor=factor, method=fallback_method)
+
+
 def outline_cleanup(
     image: Image.Image,
     outline_color: Optional[Tuple[int, int, int, int]] = None,

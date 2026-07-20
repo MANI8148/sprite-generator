@@ -16,6 +16,7 @@ from ..postprocess.processor import (
     auto_pad,
     normalize,
     upscale,
+    realesrgan_upscale,
     outline_cleanup,
     palette_lock,
 )
@@ -36,6 +37,7 @@ class PipelineConfig:
     normalize_size: bool = True
     target_size: tuple = (512, 512)
     upscale: int = 1
+    use_realesrgan: bool = False
     outline_cleanup: bool = False
     palette_lock: bool = False
     palette_name: str = "retro_16"
@@ -116,7 +118,10 @@ class AssetPipeline:
             if self.config.normalize_size:
                 p = normalize(p, target_size=self.config.target_size)
             if self.config.upscale > 1:
-                p = upscale(p, factor=self.config.upscale)
+                if self.config.use_realesrgan:
+                    p = realesrgan_upscale(p, factor=self.config.upscale)
+                else:
+                    p = upscale(p, factor=self.config.upscale)
             if self.config.outline_cleanup:
                 p = outline_cleanup(p)
             if self.config.palette_lock:
