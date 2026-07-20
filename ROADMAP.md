@@ -81,7 +81,7 @@ Download
 ## Explicitly Deferred
 - ❌ Billing / payments
 - [x] Authentication / user accounts
-- ❌ LLM Project Director
+- [x] LLM Project Director
 - ❌ Celery / Redis / DAG orchestrator
 - ❌ Multi-user team features
 - [x] Real-ESRGAN upscaling

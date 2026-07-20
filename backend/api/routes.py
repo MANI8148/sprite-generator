@@ -17,6 +17,7 @@ from backend.modules.style_engine import StyleEngine, STYLE_PRESETS
 from backend.modules.asset_memory import compute_generation_hash
 from backend.modules.auth import OptionalAuth, TokenData
 from backend.modules.billing import CreditManager, get_credit_manager
+from backend.modules.project_director import ProjectDirector, ProjectPlan
 
 router = APIRouter()
 
@@ -168,6 +169,102 @@ class BatchStatusResponse(BaseModel):
     pending: int
     status: str
     results: List[BatchResult] = []
+
+
+_director: ProjectDirector = ProjectDirector()
+
+
+def get_director() -> ProjectDirector:
+    return _director
+
+
+def set_director(d: ProjectDirector) -> None:
+    global _director
+    _director = d
+
+
+class PlanRequest(BaseModel):
+    request: str
+    auto_execute: bool = False
+
+
+class PlanResponse(BaseModel):
+    title: str
+    steps: List[dict]
+    total_steps: int
+
+
+class ExecutePlanResponse(BaseModel):
+    batch_id: str
+    job_ids: List[str]
+    total: int
+
+
+@router.post("/plan", response_model=PlanResponse)
+def create_plan(req: PlanRequest, director: ProjectDirector = Depends(get_director)):
+    plan = director.parse(req.request)
+    return PlanResponse(
+        title=plan.title,
+        steps=[s.to_dict() for s in plan.steps],
+        total_steps=len(plan.steps),
+    )
+
+
+@router.post("/plan/execute", response_model=ExecutePlanResponse, status_code=202)
+def execute_plan(
+    req: PlanRequest,
+    pipe: AssetPipeline = Depends(get_pipeline),
+    director: ProjectDirector = Depends(get_director),
+    current_user: Optional[TokenData] = Depends(OptionalAuth),
+):
+    global _generator_loaded
+    if not _generator_loaded:
+        raise HTTPException(status_code=503, detail="Generator not set. POST /load-model first.")
+
+    plan = director.parse(req.request)
+    batch_id = str(uuid.uuid4())[:8]
+    job_ids: List[str] = []
+
+    user_id = current_user.user_id if current_user else None
+    if user_id:
+        credits = get_credit_manager()
+        credits.ensure_user_exists(user_id)
+        total_cost = sum(
+            credits.get_generation_cost() * max(1, step.num_frames)
+            for step in plan.steps
+        )
+        if credits.get_balance(user_id) < total_cost:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=f"Insufficient credits. Need {total_cost}, have {credits.get_balance(user_id)}",
+            )
+
+    for i, step in enumerate(plan.steps):
+        job_id = f"{batch_id}_{i}"
+        job_ids.append(job_id)
+        output_dir = _storage.ensure_output_dir(job_id)
+
+        item = GenerateRequest(
+            asset_type=step.asset_type.value,
+            view=step.view.value,
+            animation=step.animation.value,
+            palette=step.palette.value,
+            sprite_size=step.sprite_size.value,
+            theme=step.theme,
+            num_frames=step.num_frames,
+            seed=step.seed,
+        )
+
+        queue = get_task_queue()
+        queue.submit(_run_batch_item, job_id, pipe, item, output_dir, batch_id, user_id)
+
+    _batch_jobs[batch_id] = job_ids
+
+    return ExecutePlanResponse(
+        batch_id=batch_id,
+        job_ids=job_ids,
+        total=len(plan.steps),
+    )
 
 
 class HealthResponse(BaseModel):
