@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, List
@@ -15,6 +15,8 @@ from backend.modules.storage.asset_library import AssetLibrary, AssetRecord
 from backend.modules.tasks.queue import TaskQueue, get_task_queue, JobStatus
 from backend.modules.style_engine import StyleEngine, STYLE_PRESETS
 from backend.modules.asset_memory import compute_generation_hash
+from backend.modules.auth import OptionalAuth, TokenData
+from backend.modules.billing import CreditManager, get_credit_manager
 
 router = APIRouter()
 
@@ -233,7 +235,18 @@ def _upload_to_r2(storage: R2Storage, job_id: str, output_paths: list, zip_path:
         storage.upload_file(zip_path, f"jobs/{job_id}/sprite_package.zip")
 
 
-def _run_generation_job(pipe, controls, req, output_dir, job_id):
+def _deduct_credits_for_job(user_id, num_frames, credits):
+    if user_id is None:
+        return
+    cost = credits.get_generation_cost() * max(1, num_frames)
+    credits.deduct_credits(user_id, cost, reason="generation")
+
+
+def _run_generation_job(pipe, controls, req, output_dir, job_id, user_id=None):
+    credits = get_credit_manager()
+    if user_id:
+        credits.ensure_user_exists(user_id)
+
     original_config = pipe.config
     from copy import deepcopy
     config = deepcopy(pipe.config)
@@ -280,6 +293,8 @@ def _run_generation_job(pipe, controls, req, output_dir, job_id):
     finally:
         pipe.config = original_config
 
+    _deduct_credits_for_job(user_id, req.num_frames, credits)
+
     _storage.add_job(job_id, {
         "prompt": result.metadata["prompt"],
         "quality_tier": result.validation[0]["quality_tier"],
@@ -315,7 +330,11 @@ def _run_generation_job(pipe, controls, req, output_dir, job_id):
 
 
 @router.post("/generate", response_model=GenerateResponse, status_code=202)
-def generate(req: GenerateRequest, pipe: AssetPipeline = Depends(get_pipeline)):
+def generate(
+    req: GenerateRequest,
+    pipe: AssetPipeline = Depends(get_pipeline),
+    current_user: Optional[TokenData] = Depends(OptionalAuth),
+):
     global _generator_loaded
     if not _generator_loaded:
         raise HTTPException(status_code=503, detail="Generator not set. POST /load-model first.")
@@ -330,11 +349,22 @@ def generate(req: GenerateRequest, pipe: AssetPipeline = Depends(get_pipeline)):
         seed=req.seed,
     )
 
+    user_id = current_user.user_id if current_user else None
+    if user_id:
+        credits = get_credit_manager()
+        credits.ensure_user_exists(user_id)
+        cost = credits.get_generation_cost() * max(1, req.num_frames)
+        if credits.get_balance(user_id) < cost:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=f"Insufficient credits. Need {cost}, have {credits.get_balance(user_id)}",
+            )
+
     job_id = str(uuid.uuid4())[:8]
     output_dir = _storage.ensure_output_dir(job_id)
 
     queue = get_task_queue()
-    queue.submit(_run_generation_job, job_id, pipe, controls, req, output_dir, job_id)
+    queue.submit(_run_generation_job, job_id, pipe, controls, req, output_dir, job_id, user_id)
 
     return GenerateResponse(job_id=job_id, status=JobStatus.PENDING)
 
@@ -359,10 +389,28 @@ def get_job_status(job_id: str):
 
 
 @router.post("/generate/batch", response_model=BatchGenerateResponse, status_code=202)
-def generate_batch(req: BatchGenerateRequest, pipe: AssetPipeline = Depends(get_pipeline)):
+def generate_batch(
+    req: BatchGenerateRequest,
+    pipe: AssetPipeline = Depends(get_pipeline),
+    current_user: Optional[TokenData] = Depends(OptionalAuth),
+):
     global _generator_loaded, _batch_jobs
     if not _generator_loaded:
         raise HTTPException(status_code=503, detail="Generator not set. POST /load-model first.")
+
+    user_id = current_user.user_id if current_user else None
+    if user_id:
+        credits = get_credit_manager()
+        credits.ensure_user_exists(user_id)
+        total_cost = sum(
+            credits.get_generation_cost() * max(1, item.num_frames)
+            for item in req.items
+        )
+        if credits.get_balance(user_id) < total_cost:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=f"Insufficient credits. Need {total_cost}, have {credits.get_balance(user_id)}",
+            )
 
     batch_id = req.batch_id or str(uuid.uuid4())[:8]
     job_ids: List[str] = []
@@ -373,7 +421,7 @@ def generate_batch(req: BatchGenerateRequest, pipe: AssetPipeline = Depends(get_
         output_dir = _storage.ensure_output_dir(job_id)
 
         queue = get_task_queue()
-        queue.submit(_run_batch_item, job_id, pipe, item, output_dir, batch_id)
+        queue.submit(_run_batch_item, job_id, pipe, item, output_dir, batch_id, user_id)
 
     _batch_jobs[batch_id] = job_ids
 
@@ -385,7 +433,11 @@ def generate_batch(req: BatchGenerateRequest, pipe: AssetPipeline = Depends(get_
     )
 
 
-def _run_batch_item(pipe, item, output_dir, batch_id):
+def _run_batch_item(pipe, item, output_dir, batch_id, user_id=None):
+    credits = get_credit_manager()
+    if user_id:
+        credits.ensure_user_exists(user_id)
+
     controls = AssetControls(
         asset_type=AssetType(item.asset_type),
         view=View(item.view),
@@ -442,6 +494,8 @@ def _run_batch_item(pipe, item, output_dir, batch_id):
     finally:
         pipe.config = original_config
     job_id = os.path.basename(output_dir.rstrip("/\\"))
+
+    _deduct_credits_for_job(user_id, item.num_frames, credits)
 
     _upload_to_r2(_r2_storage, job_id, result.output_paths, result.zip_path)
 
