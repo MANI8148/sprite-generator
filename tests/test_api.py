@@ -169,7 +169,7 @@ class TestGenerate:
             data = resp.json()
             result = poll_job(client, data["job_id"])
             assert result["status"] == "done"
-            assert result["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline")
+            assert result["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline", "empty")
 
     def test_generate_metadata_includes_controls(self, client):
         resp = client.post("/generate", json={
@@ -394,8 +394,8 @@ class TestBatchGenerate:
         assert result["completed"] == 2
         assert result["failed"] == 0
         assert len(result["results"]) == 2
-        assert result["results"][0]["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline")
-        assert result["results"][1]["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline")
+        assert result["results"][0]["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline", "empty")
+        assert result["results"][1]["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline", "empty")
 
     def test_batch_generate_empty_items(self, client):
         resp = client.post("/generate/batch", json={"items": []})
@@ -458,7 +458,7 @@ class TestBatchGenerate:
         result = poll_batch(client, data["batch_id"])
         assert result["completed"] == 5
         for r in result["results"]:
-            assert r["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline")
+            assert r["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline", "empty")
 
     def test_batch_generate_different_views(self, client):
         items = [

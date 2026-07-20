@@ -64,7 +64,7 @@ class TestPipelineSmoke:
         assert result.images[0].mode == "RGBA"
         assert result.metadata["prompt"] != ""
         assert len(result.validation) == 1
-        assert result.validation[0]["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline")
+        assert result.validation[0]["quality_tier"] in ("clean", "acceptable", "noisy", "blurry", "broken_outline", "empty")
         assert len(result.output_paths) > 0
         assert any(p.endswith(".png") for p in result.output_paths)
         assert any(p.endswith(".json") for p in result.output_paths)

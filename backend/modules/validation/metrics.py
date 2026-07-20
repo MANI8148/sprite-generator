@@ -1,3 +1,4 @@
+import hashlib
 import numpy as np
 from PIL import Image
 from typing import Dict, Tuple, Optional
@@ -55,9 +56,9 @@ def outline_continuity(image: Image.Image) -> float:
     arr = np.array(rgba)
     alpha = arr[:, :, 3] > 128
     h, w = alpha.shape
-    # Count edge pixels (opaque with at least one transparent neighbor)
     from scipy.ndimage import binary_dilation
-    dilated = binary_dilation(alpha, iterations=1)
+    struct = np.ones((3, 3), dtype=bool)
+    dilated = binary_dilation(alpha, iterations=1, structure=struct)
     edge = dilated & ~alpha
     # Count connected components in the edge
     from scipy.ndimage import label
@@ -74,20 +75,24 @@ def pixel_sharpness(image: Image.Image) -> float:
     arr = np.array(gray, dtype=np.float32)
     from scipy.ndimage import convolve
     lap = np.array([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=np.float32)
-    lap_out = convolve(arr, lap, mode="constant")
+    lap_out = convolve(arr, lap, mode="reflect")
     return float(np.var(lap_out))
+
+
+def _image_hash(img: Image.Image) -> str:
+    small = img.resize((16, 16), Image.NEAREST).convert("L")
+    arr = np.array(small, dtype=np.uint8)
+    if arr.max() == arr.min():
+        return hashlib.md5(arr.tobytes()).hexdigest()
+    avg = arr.mean()
+    bits = "".join(["1" if p > avg else "0" for p in arr.flatten()])
+    return bits
 
 
 def duplicate_detection(images: list) -> int:
     if len(images) < 2:
         return 0
-    hashes = []
-    for img in images:
-        small = img.resize((16, 16), Image.NEAREST).convert("L")
-        arr = np.array(small)
-        avg = arr.mean()
-        h = "".join(["1" if p > avg else "0" for p in arr.flatten()])
-        hashes.append(h)
+    hashes = [_image_hash(img) for img in images]
     dupes = 0
     for i in range(len(hashes)):
         for j in range(i + 1, len(hashes)):
@@ -135,7 +140,9 @@ def assess_all(image: Image.Image, batch: list = None) -> Dict:
     result["sharpness"] = round(pixel_sharpness(image), 1)
     result["palette_consistency"] = round(palette_consistency(image), 3)
     quality = "clean"
-    if result["palette_size"] > 128:
+    if result["palette_size"] == 0 or result["transparency_ratio"] >= 0.99:
+        quality = "empty"
+    elif result["palette_size"] > 128:
         quality = "noisy"
     elif result["outline_continuity"] < 0.8:
         quality = "broken_outline"
