@@ -82,7 +82,7 @@ Download
 - [x] Billing / payments
 - [x] Authentication / user accounts
 - [x] LLM Project Director
-- ❌ Celery / Redis / DAG orchestrator
+- [x] Celery / Redis / DAG orchestrator
 - ❌ Multi-user team features
 - [x] Real-ESRGAN upscaling
 
