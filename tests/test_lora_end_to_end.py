@@ -61,8 +61,11 @@ class LoRAGenerator:
     ) -> List[Image.Image]:
         n = num_images or 1
         images = []
-        for _ in range(n):
-            z = torch.randn(1, 256, 4, 4, device=self.device)
+        for i in range(n):
+            gen = None
+            if seed >= 0:
+                gen = torch.Generator(device=self.device).manual_seed(seed + i)
+            z = torch.randn(1, 256, 4, 4, device=self.device, generator=gen)
             with torch.no_grad():
                 out = self.model.decode(z)
             out = out.clamp(0, 1).cpu()
@@ -280,6 +283,21 @@ class TestLoRAEndToEnd:
         assert any(p.endswith(".json") for p in result.output_paths)
         assert result.zip_path is not None
         assert Path(result.zip_path).exists()
+
+    def test_seed_determinism_in_lora_generator(self, tmp_path):
+        model = SpriteLoRAWrapper(rank=4, alpha=1.0)
+        model.eval()
+        gen = LoRAGenerator(model)
+        imgs1 = gen.generate(seed=42)
+        imgs2 = gen.generate(seed=42)
+        imgs3 = gen.generate(seed=99)
+        assert len(imgs1) == 1
+        assert len(imgs2) == 1
+        assert len(imgs3) == 1
+        assert np.array_equal(np.array(imgs1[0]), np.array(imgs2[0])), \
+            "same seed should produce identical images"
+        assert not np.array_equal(np.array(imgs1[0]), np.array(imgs3[0])), \
+            "different seeds should produce different images"
 
     def test_lora_weights_persistence_quality(self, tmp_path):
         model = SpriteLoRAWrapper(rank=4, alpha=2.0)
