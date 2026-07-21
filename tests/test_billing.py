@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from backend.main import app
 from backend.modules.billing import CreditManager, get_credit_manager, set_credit_manager
+from backend.modules.billing.payments import StripePaymentGateway, set_payment_gateway, get_payment_gateway, CREDIT_PACKAGES
 from backend.modules.auth import AuthHandler, set_auth_handler, get_auth_handler
 from backend.modules.rate_limiter import RateLimiter, set_rate_limiter, get_rate_limiter
 from backend.api.routes import set_pipeline, set_generator_loaded, set_storage, set_library, _batch_jobs
@@ -34,6 +35,10 @@ def test_setup():
     limiter = RateLimiter(max_requests=1000, window_seconds=60)
     set_rate_limiter(limiter)
 
+    old_gateway = get_payment_gateway()
+    test_gateway = StripePaymentGateway(api_key="sk_test_mock", webhook_secret="whsec_mock")
+    set_payment_gateway(test_gateway)
+
     set_generator_loaded(False)
     set_storage(FileStorage(base_dir=os.path.join(tmp, "storage")))
     set_library(AssetLibrary(base_dir=os.path.join(tmp, "lib")))
@@ -41,6 +46,7 @@ def test_setup():
 
     yield
 
+    set_payment_gateway(old_gateway)
     set_rate_limiter(old_limiter)
     set_credit_manager(old_credits)
     set_auth_handler(old_auth)
@@ -388,3 +394,227 @@ class TestBillingGenerationIntegration:
         from tests.test_api import poll_batch
         result = poll_batch(unauthed_client, data["batch_id"])
         assert result["completed"] == 1
+
+
+class TestStripePaymentGateway:
+    def test_not_available_without_key(self):
+        gw = StripePaymentGateway(api_key="")
+        assert not gw.available
+
+    def test_available_with_key(self):
+        gw = StripePaymentGateway(api_key="sk_test_abc123")
+        assert gw.available
+
+    def test_create_checkout_session_without_key_returns_none(self):
+        gw = StripePaymentGateway(api_key="")
+        result = gw.create_checkout_session("starter", "user_1")
+        assert result is None
+
+    def test_get_packages_returns_all(self):
+        gw = StripePaymentGateway(api_key="sk_test_abc")
+        pkgs = gw.get_packages()
+        assert "starter" in pkgs
+        assert "pro" in pkgs
+        assert "studio" in pkgs
+        assert pkgs["starter"]["credits"] == 100
+
+    def test_create_checkout_session_unknown_package(self):
+        gw = StripePaymentGateway(api_key="sk_test_abc")
+        result = gw.create_checkout_session("nonexistent", "user_1")
+        assert result is None
+
+    def test_create_checkout_session_calls_stripe(self):
+        gw = StripePaymentGateway(api_key="sk_test_abc")
+        import unittest.mock as mock
+        fake_session = mock.MagicMock()
+        fake_session.id = "cs_test_abc123"
+        fake_session.url = "https://checkout.stripe.com/pay/cs_test_abc123"
+        with mock.patch("stripe.checkout.Session.create", return_value=fake_session):
+            result = gw.create_checkout_session("starter", "user_42")
+            assert result is not None
+            assert result["session_id"] == "cs_test_abc123"
+            assert "checkout.stripe.com" in result["url"]
+
+    def test_handle_webhook_without_key_returns_none(self):
+        gw = StripePaymentGateway(api_key="", webhook_secret="")
+        result = gw.handle_webhook(b"{}", "sig")
+        assert result is None
+
+    def test_handle_webhook_valid_payment(self):
+        gw = StripePaymentGateway(api_key="sk_test_abc", webhook_secret="whsec_test")
+        import unittest.mock as mock
+        fake_event = {
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": "cs_test_xyz",
+                    "payment_status": "paid",
+                    "client_reference_id": "user_99",
+                    "metadata": {"package": "pro", "credits": "500"},
+                }
+            },
+        }
+        with mock.patch("stripe.Webhook.construct_event", return_value=fake_event):
+            result = gw.handle_webhook(b"{}", "sig")
+            assert result is not None
+            assert result["user_id"] == "user_99"
+            assert result["credits"] == 500
+            assert result["package"] == "pro"
+
+    def test_handle_webhook_unpaid_ignored(self):
+        gw = StripePaymentGateway(api_key="sk_test_abc", webhook_secret="whsec_test")
+        import unittest.mock as mock
+        fake_event = {
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": "cs_test_unpaid",
+                    "payment_status": "unpaid",
+                    "client_reference_id": "user_99",
+                    "metadata": {"package": "pro", "credits": "500"},
+                }
+            },
+        }
+        with mock.patch("stripe.Webhook.construct_event", return_value=fake_event):
+            result = gw.handle_webhook(b"{}", "sig")
+            assert result is None
+
+    def test_handle_webhook_wrong_event_type(self):
+        gw = StripePaymentGateway(api_key="sk_test_abc", webhook_secret="whsec_test")
+        import unittest.mock as mock
+        fake_event = {"type": "payment_intent.succeeded", "data": {"object": {}}}
+        with mock.patch("stripe.Webhook.construct_event", return_value=fake_event):
+            result = gw.handle_webhook(b"{}", "sig")
+            assert result is None
+
+    def test_handle_webhook_signature_failure(self):
+        gw = StripePaymentGateway(api_key="sk_test_abc", webhook_secret="whsec_test")
+        import unittest.mock as mock
+        with mock.patch("stripe.Webhook.construct_event", side_effect=ValueError("bad sig")):
+            result = gw.handle_webhook(b"{}", "bad_sig")
+            assert result is None
+
+    def test_handle_webhook_no_user_id(self):
+        gw = StripePaymentGateway(api_key="sk_test_abc", webhook_secret="whsec_test")
+        import unittest.mock as mock
+        fake_event = {
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": "cs_test_no_user",
+                    "payment_status": "paid",
+                    "client_reference_id": "",
+                    "metadata": {"package": "pro", "credits": "500"},
+                }
+            },
+        }
+        with mock.patch("stripe.Webhook.construct_event", return_value=fake_event):
+            result = gw.handle_webhook(b"{}", "sig")
+            assert result is None
+
+
+class TestPaymentAPI:
+    def test_list_packages(self, authed_client):
+        resp = authed_client.get("/billing/packages")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "packages" in data
+        keys = [p["key"] for p in data["packages"]]
+        assert "starter" in keys
+        assert "pro" in keys
+        assert "studio" in keys
+
+    def test_create_checkout_requires_auth(self, unauthed_client):
+        resp = unauthed_client.post("/billing/create-checkout-session", json={
+            "package": "starter",
+        })
+        assert resp.status_code == 401
+
+    def test_create_checkout_unknown_package(self, authed_client):
+        resp = authed_client.post("/billing/create-checkout-session", json={
+            "package": "nonexistent",
+        })
+        assert resp.status_code == 400
+
+    def test_create_checkout_calls_stripe(self, authed_client):
+        import unittest.mock as mock
+        fake_session = mock.MagicMock()
+        fake_session.id = "cs_test_mock_123"
+        fake_session.url = "https://checkout.stripe.com/pay/cs_test_mock_123"
+        with mock.patch("stripe.checkout.Session.create", return_value=fake_session):
+            resp = authed_client.post("/billing/create-checkout-session", json={
+                "package": "pro",
+                "success_url": "https://example.com/success",
+                "cancel_url": "https://example.com/cancel",
+            })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["session_id"] == "cs_test_mock_123"
+        assert "checkout.stripe.com" in data["url"]
+
+    def test_webhook_adds_credits(self, authed_client):
+        import unittest.mock as mock
+        bal_before = authed_client.get("/billing/balance").json()
+        user_id = bal_before["user_id"]
+        fake_event = {
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": "cs_test_wh",
+                    "payment_status": "paid",
+                    "client_reference_id": user_id,
+                    "metadata": {"package": "pro", "credits": "500"},
+                }
+            },
+        }
+        with mock.patch("stripe.Webhook.construct_event", return_value=fake_event):
+            resp = authed_client.post(
+                "/billing/webhook",
+                content=b"{}",
+                headers={"stripe-signature": "test_sig"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "completed"
+        assert data["credits_added"] == 500
+
+        bal = authed_client.get("/billing/balance").json()
+        assert bal["balance"] == 600
+
+    def test_webhook_unpaid_ignored(self, authed_client):
+        import unittest.mock as mock
+        fake_event = {
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": "cs_test_unpaid",
+                    "payment_status": "unpaid",
+                    "client_reference_id": "billinguser",
+                    "metadata": {"package": "pro", "credits": "500"},
+                }
+            },
+        }
+        with mock.patch("stripe.Webhook.construct_event", return_value=fake_event):
+            resp = authed_client.post(
+                "/billing/webhook",
+                content=b"{}",
+                headers={"stripe-signature": "test_sig"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ignored"
+
+    def test_webhook_without_gateway_returns_503(self):
+        old_gw = get_payment_gateway()
+        set_payment_gateway(StripePaymentGateway(api_key=""))
+        try:
+            pipe = AssetPipeline()
+            from tests.test_api import FakeGenerator
+            pipe.set_generator(FakeGenerator(num_images=1))
+            set_pipeline(pipe)
+            set_generator_loaded(True)
+            tc = TestClient(app)
+            resp = tc.post("/billing/webhook", content=b"{}", headers={"stripe-signature": "sig"})
+            assert resp.status_code == 503
+        finally:
+            set_payment_gateway(old_gw)

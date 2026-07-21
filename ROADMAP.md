@@ -79,7 +79,7 @@ Download
 - [x] Incremental regeneration ("asset memory")
 
 ## Explicitly Deferred
-- ❌ Billing / payments
+- [x] Billing / payments
 - [x] Authentication / user accounts
 - [x] LLM Project Director
 - ❌ Celery / Redis / DAG orchestrator

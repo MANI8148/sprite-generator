@@ -14,3 +14,4 @@ diffusers>=0.21.0
 peft>=0.6.0
 boto3>=1.28.0
 pyjwt>=2.8.0
+stripe>=7.0.0
