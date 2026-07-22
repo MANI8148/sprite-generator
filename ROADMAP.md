@@ -83,7 +83,7 @@ Download
 - [x] Authentication / user accounts
 - [x] LLM Project Director
 - [x] Celery / Redis / DAG orchestrator
-- ❌ Multi-user team features
+- [x] Multi-user team features
 - [x] Real-ESRGAN upscaling
 
 Until the MVP is validated with real users.
