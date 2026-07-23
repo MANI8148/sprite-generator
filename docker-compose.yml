@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      target: backend-base
+    ports:
+      - "8000:8000"
+    environment:
+      - RATE_LIMIT_MAX_REQUESTS=60
+      - RATE_LIMIT_WINDOW_SECONDS=60
+    volumes:
+      - ./data:/app/data
+
+  frontend:
+    build:
+      context: .
+      target: frontend-prod
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000

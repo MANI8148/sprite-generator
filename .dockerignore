@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+.git
+.gitignore
+.env
+.vscode
+.idea
+node_modules
+*.md
+data/
+models/
+kaggle/
+.github/
