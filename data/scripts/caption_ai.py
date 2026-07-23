@@ -137,6 +137,20 @@ def caption_locally(img: Image.Image) -> dict:
     }
 
 
+def labels_to_caption(labels: dict, prefix: str = "pixel art sprite") -> str:
+    """Convert structured labels from caption_locally/caption_with_api into a
+    natural language caption string suitable for SD/LoRA training."""
+    cls = labels.get("class", "character")
+    action = labels.get("action", "idle")
+    direction = labels.get("direction", "front")
+    parts = [prefix, "of a", cls]
+    if action and action != "idle":
+        parts.append(action)
+    if direction:
+        parts.append(f"facing {direction}")
+    return " ".join(parts)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Auto-label sprites with AI")
     parser.add_argument("--input", "-i", default="data/processed",

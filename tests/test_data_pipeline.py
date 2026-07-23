@@ -19,7 +19,7 @@ from data.scripts.clean_normalize import (
     quantize_to_palette,
     build_global_palette,
 )
-from data.scripts.caption_ai import caption_locally, caption_with_api, _analyze_action, _analyze_direction
+from data.scripts.caption_ai import caption_locally, caption_with_api, labels_to_caption, _analyze_action, _analyze_direction
 from data.scripts.augment_dataset import (
     color_jitter,
     random_translate,
@@ -335,3 +335,40 @@ class TestCaptionAI:
     def test_caption_without_model_falls_back_to_local(self, sprite_image):
         result = caption_locally(sprite_image)
         assert result["class"] == "character"
+
+
+class TestLabelsToCaption:
+    def test_character_idle_front(self):
+        labels = {"class": "character", "action": "idle", "direction": "front"}
+        result = labels_to_caption(labels)
+        assert result == "pixel art sprite of a character facing front"
+
+    def test_character_walking_right(self):
+        labels = {"class": "character", "action": "walking", "direction": "right"}
+        result = labels_to_caption(labels)
+        assert result == "pixel art sprite of a character walking facing right"
+
+    def test_enemy_attack_left(self):
+        labels = {"class": "enemy", "action": "attack", "direction": "left"}
+        result = labels_to_caption(labels)
+        assert result == "pixel art sprite of a enemy attack facing left"
+
+    def test_item_idle(self):
+        labels = {"class": "item", "action": "idle", "direction": "front"}
+        result = labels_to_caption(labels)
+        assert result == "pixel art sprite of a item facing front"
+
+    def test_unknown_action_is_skipped(self):
+        labels = {"class": "npc", "action": "", "direction": "back"}
+        result = labels_to_caption(labels)
+        assert result == "pixel art sprite of a npc facing back"
+
+    def test_custom_prefix(self):
+        labels = {"class": "tile", "action": "idle", "direction": "front"}
+        result = labels_to_caption(labels, prefix="retro game asset")
+        assert result == "retro game asset of a tile facing front"
+
+    def test_action_skipped_for_idle(self):
+        labels = {"class": "weapon", "action": "idle", "direction": "front"}
+        result = labels_to_caption(labels)
+        assert "idle" not in result  # 'idle' should not appear in caption
