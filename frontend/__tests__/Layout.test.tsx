@@ -34,4 +34,13 @@ describe("Layout", () => {
     );
     expect(screen.getByText("Generate")).toBeTruthy();
   });
+
+  it("renders Billing in navbar", () => {
+    render(
+      <Layout>
+        <div>Content</div>
+      </Layout>
+    );
+    expect(screen.getByText("Billing")).toBeTruthy();
+  });
 });
