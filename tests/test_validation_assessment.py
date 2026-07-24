@@ -8,6 +8,7 @@ from backend.modules.validation.metrics import (
     assess_all,
     palette_size,
     sprite_centering,
+    sprite_aspect_ratio,
     bounding_box,
     transparency_coverage,
     outline_continuity,
@@ -129,6 +130,7 @@ class TestAssessAll:
             "palette_size", "center_x", "center_y",
             "transparency_ratio", "outline_continuity",
             "sharpness", "quality_tier", "palette_consistency",
+            "aspect_ratio",
         }
         assert expected.issubset(result.keys())
 
@@ -147,7 +149,7 @@ class TestAssessAll:
             result = assess_all(img)
             assert "bbox" in result, f"bbox missing for size={w}x{h}, sprite={sw}"
             assert result["quality_tier"] in (
-                "clean", "acceptable", "noisy", "blurry", "broken_outline", "empty"
+                "clean", "acceptable", "noisy", "blurry", "broken_outline", "empty", "extreme_aspect"
             )
 
 
@@ -286,6 +288,52 @@ class TestPaletteConsistency:
         img = _solid((128, 128, 128))
         score = palette_consistency(img, "gameboy")
         assert 0.0 <= score <= 1.0
+
+
+class TestSpriteAspectRatio:
+    def test_square_sprite(self):
+        img = _sprite((255, 0, 0), size=(64, 64), sprite_size=(32, 32))
+        ratio = sprite_aspect_ratio(img)
+        assert ratio == 1.0
+
+    def test_wide_sprite(self):
+        arr = np.zeros((64, 64, 4), dtype=np.uint8)
+        arr[16:48, 4:60, :3] = [255, 0, 0]
+        arr[16:48, 4:60, 3] = 255
+        img = Image.fromarray(arr, "RGBA")
+        ratio = sprite_aspect_ratio(img)
+        assert ratio > 1.0
+
+    def test_tall_sprite(self):
+        arr = np.zeros((64, 64, 4), dtype=np.uint8)
+        arr[4:60, 16:48, :3] = [0, 255, 0]
+        arr[4:60, 16:48, 3] = 255
+        img = Image.fromarray(arr, "RGBA")
+        ratio = sprite_aspect_ratio(img)
+        assert ratio > 1.0
+
+    def test_empty_image_returns_one(self):
+        arr = np.zeros((64, 64, 4), dtype=np.uint8)
+        img = Image.fromarray(arr, "RGBA")
+        ratio = sprite_aspect_ratio(img)
+        assert ratio == 1.0
+
+    def test_single_pixel(self):
+        arr = np.zeros((64, 64, 4), dtype=np.uint8)
+        arr[32, 32, :3] = [255, 255, 255]
+        arr[32, 32, 3] = 255
+        img = Image.fromarray(arr, "RGBA")
+        ratio = sprite_aspect_ratio(img)
+        assert ratio == 1.0
+
+    def test_extreme_aspect_ratio_triggers_tier(self):
+        arr = np.zeros((64, 64, 4), dtype=np.uint8)
+        arr[28:36, 2:62, :3] = [255, 0, 0]
+        arr[28:36, 2:62, 3] = 255
+        img = Image.fromarray(arr, "RGBA")
+        result = assess_all(img)
+        assert result["aspect_ratio"] > 4.0
+        assert result["quality_tier"] == "extreme_aspect"
 
 
 class TestOutlineContinuity:

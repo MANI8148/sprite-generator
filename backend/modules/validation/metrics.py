@@ -122,6 +122,21 @@ def palette_consistency(image: Image.Image, palette_name: str = "retro_16") -> f
     return float(np.mean(scores))
 
 
+def sprite_aspect_ratio(image: Image.Image) -> float:
+    bbox = bounding_box(image)
+    if bbox is None:
+        return 1.0
+    x, y, x2, y2 = bbox
+    w = x2 - x + 1
+    h = y2 - y + 1
+    if h == 0:
+        return 1.0
+    ratio = w / h
+    if ratio < 1.0:
+        ratio = 1.0 / ratio
+    return round(ratio, 2)
+
+
 def assess_all(image: Image.Image, batch: list = None) -> Dict:
     result = {}
     result["palette_size"] = palette_size(image)
@@ -139,9 +154,12 @@ def assess_all(image: Image.Image, batch: list = None) -> Dict:
     result["outline_continuity"] = round(outline_continuity(image), 3)
     result["sharpness"] = round(pixel_sharpness(image), 1)
     result["palette_consistency"] = round(palette_consistency(image), 3)
+    result["aspect_ratio"] = sprite_aspect_ratio(image)
     quality = "clean"
     if result["palette_size"] == 0 or result["transparency_ratio"] >= 0.99:
         quality = "empty"
+    elif result["aspect_ratio"] > 4.0:
+        quality = "extreme_aspect"
     elif result["palette_size"] > 128:
         quality = "noisy"
     elif result["outline_continuity"] < 0.8:

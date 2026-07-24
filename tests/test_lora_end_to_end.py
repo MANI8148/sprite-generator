@@ -118,7 +118,7 @@ class TestLoRAEndToEnd:
         assert result.metadata["prompt"] != ""
         assert len(result.validation) == 1
         assert result.validation[0]["quality_tier"] in (
-            "clean", "acceptable", "noisy", "blurry", "broken_outline", "empty"
+            "clean", "acceptable", "noisy", "blurry", "broken_outline", "empty", "extreme_aspect"
         )
         assert len(result.output_paths) > 0
         assert any(p.endswith(".png") for p in result.output_paths)
@@ -188,7 +188,7 @@ class TestLoRAEndToEnd:
         assert all(k in result.validation[0] for k in [
             "palette_size", "center_x", "center_y",
             "transparency_ratio", "outline_continuity",
-            "sharpness", "quality_tier", "bbox", "bbox_area",
+            "sharpness", "quality_tier", "aspect_ratio", "bbox", "bbox_area",
         ])
 
     def test_pipeline_with_lora_multiple_frames(self, tmp_path):
@@ -275,7 +275,7 @@ class TestLoRAEndToEnd:
         assert len(result.validation) == 1
         v = result.validation[0]
         for key in ("palette_size", "center_x", "center_y", "transparency_ratio",
-                     "outline_continuity", "sharpness", "quality_tier", "bbox", "bbox_area"):
+                     "outline_continuity", "sharpness", "quality_tier", "aspect_ratio", "bbox", "bbox_area"):
             assert key in v, f"Missing validation key: {key}"
 
         assert len(result.output_paths) > 0
