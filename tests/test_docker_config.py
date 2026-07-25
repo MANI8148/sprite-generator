@@ -34,6 +34,15 @@ class TestDockerfile:
         assert "requirements.txt" in text
         assert "pip install" in text
 
+    def test_dockerfile_has_test_stage(self):
+        text = (REPO_ROOT / "Dockerfile").read_text()
+        assert "AS test" in text
+        assert "pytest" in text
+
+    def test_dockerfile_test_stage_runs_pytest(self):
+        text = (REPO_ROOT / "Dockerfile").read_text()
+        assert '["python", "-m", "pytest"' in text
+
 
 class TestDockerCompose:
     def test_docker_compose_exists(self):
@@ -52,6 +61,17 @@ class TestDockerCompose:
     def test_docker_compose_backend_depends_on(self):
         text = (REPO_ROOT / "docker-compose.yml").read_text()
         assert "depends_on" in text
+
+    def test_docker_compose_test_service(self):
+        text = (REPO_ROOT / "docker-compose.yml").read_text()
+        assert "test:" in text
+        assert "target: test" in text
+
+    def test_docker_compose_test_service_depends_on_backend(self):
+        text = (REPO_ROOT / "docker-compose.yml").read_text()
+        assert "test:" in text
+        assert "depends_on" in text
+        assert "backend" in text
 
 
 class TestDockerignore:

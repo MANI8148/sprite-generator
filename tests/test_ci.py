@@ -1,17 +1,14 @@
 from pathlib import Path
 
-CI_FILE = Path(__file__).parent.parent / ".github" / "workflows" / "ci.yml"
-CI_FILE_LEGACY = Path(__file__).parent.parent / "scripts" / "ci.yml"
+CI_FILE = Path(__file__).parent.parent / "scripts" / "ci.yml"
 
 
 class TestCIWorkflow:
     def _read_ci(self) -> str:
-        if CI_FILE.exists():
-            return CI_FILE.read_text()
-        return CI_FILE_LEGACY.read_text()
+        return CI_FILE.read_text()
 
-    def test_workflow_exists(self):
-        assert CI_FILE.exists() or CI_FILE_LEGACY.exists(), "ci.yml workflow file not found"
+    def test_ci_workflow_exists(self):
+        assert CI_FILE.exists(), f"ci.yml workflow file not found at {CI_FILE}"
 
     def test_triggers_push_main(self):
         text = self._read_ci()
