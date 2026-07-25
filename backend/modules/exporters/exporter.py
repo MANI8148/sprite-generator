@@ -19,22 +19,33 @@ def godot(atlas: Image.Image, metadata: dict, output_dir: str) -> List[str]:
     atlas.save(atlas_path)
     tres_path = os.path.join(output_dir, f"{name}.tres")
     frames = metadata.get("frames", [])
+
+    load_steps = 2 + len(frames)
     tres_lines = [
-        "[gd_resource type=\"SpriteFrames\" load_steps=2 format=3 uid=\"uid://{}_{}\"]".format(name, "sprite"),
+        f"[gd_resource type=\"SpriteFrames\" load_steps={load_steps} format=3 uid=\"uid://{name}_sprite\"]",
         "",
-        "[ext_resource type=\"Texture2D\" path=\"res://{}\"]".format(os.path.basename(atlas_path)),
+        f"[ext_resource type=\"Texture2D\" path=\"res://{os.path.basename(atlas_path)}\" id=\"1_{name}\"]",
         "",
-        "[resource]",
-        "animations = [{",
-        "\"name\": &\"{}\",".format(name),
-        "\"speed\": 5.0,",
-        "\"loop\": true,",
     ]
-    for f in frames:
-        tres_lines.append("\"frames\": [{")
+    for i, f in enumerate(frames):
+        sub_id = f"AtlasTexture_{name}_{i}"
+        tres_lines.append(f"[sub_resource type=\"AtlasTexture\" id=\"{sub_id}\"]")
+        tres_lines.append(f"atlas = ExtResource(\"1_{name}\")")
+        tres_lines.append(f"region = Rect2({f['x']}, {f['y']}, {f['w']}, {f['h']})")
+        tres_lines.append("")
+    tres_lines.append("[resource]")
+    tres_lines.append("animations = [{")
+    tres_lines.append(f"\"name\": &\"{name}\",")
+    tres_lines.append("\"speed\": 5.0,")
+    tres_lines.append("\"loop\": true,")
+    tres_lines.append("\"frames\": [")
+    for i, f in enumerate(frames):
+        sub_id = f"AtlasTexture_{name}_{i}"
+        tres_lines.append("{")
         tres_lines.append("\"duration\": 0.2,")
-        tres_lines.append("\"region\": Rect2({}, {}, {}, {})".format(f["x"], f["y"], f["w"], f["h"]))
-        tres_lines.append("}],")
+        tres_lines.append(f"\"region\": SubResource(\"{sub_id}\")")
+        tres_lines.append("}," if i < len(frames) - 1 else "}")
+    tres_lines.append("]")
     tres_lines.append("}]")
     with open(tres_path, "w") as f:
         f.write("\n".join(tres_lines))

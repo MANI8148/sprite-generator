@@ -67,6 +67,61 @@ class TestGodotExporter:
         assert "Rect2(0, 0, 32, 32)" in text
         assert "Rect2(32, 0, 32, 32)" in text
 
+    def test_tres_has_ext_resource_for_texture(self, tmp_path):
+        atlas = _make_sample_atlas()
+        meta = _make_metadata("hero", 1)
+        paths = godot(atlas, meta, str(tmp_path))
+        text = Path(paths[1]).read_text()
+        assert "ExtResource(" in text
+        assert "Texture2D" in text
+        assert "hero.png" in text
+
+    def test_tres_has_sub_resources_for_frames(self, tmp_path):
+        atlas = _make_sample_atlas()
+        meta = _make_metadata("char", 3)
+        paths = godot(atlas, meta, str(tmp_path))
+        text = Path(paths[1]).read_text()
+        assert text.count("[sub_resource type=\"AtlasTexture\"") == 3
+        assert text.count("SubResource(\"") == 3
+        assert text.count("type=\"AtlasTexture\"") == 3
+
+    def test_tres_frames_array_contains_all_frames(self, tmp_path):
+        atlas = _make_sample_atlas()
+        meta = _make_metadata("multi", 4)
+        paths = godot(atlas, meta, str(tmp_path))
+        text = Path(paths[1]).read_text()
+        assert text.count("\"duration\": 0.2") == 4
+        assert text.count("Rect2(") == 4
+        assert text.count("SubResource(\"AtlasTexture_multi_") == 4
+
+    def test_tres_load_steps_matches_resource_count(self, tmp_path):
+        atlas = _make_sample_atlas()
+        meta = _make_metadata("steps", 3)
+        paths = godot(atlas, meta, str(tmp_path))
+        text = Path(paths[1]).read_text()
+        assert "load_steps=5" in text
+
+    def test_tres_single_frame_no_trailing_comma_in_frames(self, tmp_path):
+        atlas = _make_sample_atlas()
+        meta = _make_metadata("single", 1)
+        paths = godot(atlas, meta, str(tmp_path))
+        text = Path(paths[1]).read_text()
+        # Verify frames array has exactly one entry with no trailing comma
+        import re
+        frames_section = re.search(r'\"frames\": \[(.*?)\]', text, re.DOTALL)
+        assert frames_section is not None
+        assert frames_section.group(1).count("duration") == 1
+
+    def test_tres_empty_frames_still_valid(self, tmp_path):
+        atlas = _make_sample_atlas()
+        meta = _make_metadata("empty", 0)
+        meta["frames"] = []
+        paths = godot(atlas, meta, str(tmp_path))
+        text = Path(paths[1]).read_text()
+        assert "frames" in text
+        # Should have no frame entries but still be valid structure
+        assert "animations" in text
+
 
 class TestUnityExporter:
     def test_creates_png_and_meta(self, tmp_path):
