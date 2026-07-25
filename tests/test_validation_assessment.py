@@ -369,3 +369,92 @@ class TestDuplicateDetection:
 
     def test_empty(self):
         assert duplicate_detection([]) == 0
+
+
+class TestVisualReport:
+    def test_render_validation_grid_returns_image(self):
+        sprites = [_sprite((255, 0, 0)), _sprite((0, 255, 0))]
+        from backend.modules.validation.visual_report import render_validation_grid
+        grid = render_validation_grid(sprites)
+        assert isinstance(grid, Image.Image)
+        assert grid.mode == "RGBA"
+
+    def test_render_grid_single_sprite(self):
+        from backend.modules.validation.visual_report import render_validation_grid
+        grid = render_validation_grid([_sprite((100, 150, 200))])
+        assert grid.width > 0
+        assert grid.height > 0
+
+    def test_render_grid_with_custom_title(self):
+        from backend.modules.validation.visual_report import render_validation_grid
+        grid = render_validation_grid([_sprite((50, 100, 200))], title="My Test Report")
+        assert isinstance(grid, Image.Image)
+
+    def test_render_grid_empty_raises(self):
+        from backend.modules.validation.visual_report import render_validation_grid
+        import pytest
+        with pytest.raises(ValueError, match="At least one sprite"):
+            render_validation_grid([])
+
+    def test_generate_validation_report_returns_bytes(self):
+        sprites = [_sprite((255, 0, 0)), _sprite((0, 255, 0)), _sprite((0, 0, 255))]
+        from backend.modules.validation.visual_report import generate_validation_report
+        png_bytes = generate_validation_report(sprites)
+        assert isinstance(png_bytes, bytes)
+        assert len(png_bytes) > 100
+        assert png_bytes[:8] == b'\x89PNG\r\n\x1a\n'
+
+    def test_generate_validation_report_saves_file(self, tmp_path):
+        sprites = [_sprite((200, 100, 50))]
+        from backend.modules.validation.visual_report import generate_validation_report
+        out = tmp_path / "report.png"
+        generate_validation_report(sprites, output_path=str(out))
+        assert out.exists()
+        assert out.stat().st_size > 100
+
+    def test_generate_validation_report_with_metrics(self):
+        sprites = [_sprite((255, 0, 0)), _sprite((100, 200, 50))]
+        from backend.modules.validation.metrics import assess_all
+        from backend.modules.validation.visual_report import generate_validation_report
+        metrics = [assess_all(img) for img in sprites]
+        png_bytes = generate_validation_report(sprites, metrics_list=metrics, title="With Metrics")
+        assert isinstance(png_bytes, bytes)
+        assert len(png_bytes) > 100
+
+    def test_summarize_metrics_empty(self):
+        from backend.modules.validation.visual_report import summarize_metrics
+        assert summarize_metrics([]) == {}
+
+    def test_summarize_metrics_all_clean(self):
+        from backend.modules.validation.metrics import assess_all
+        from backend.modules.validation.visual_report import summarize_metrics
+        sprites = [_sprite((255, 0, 0)), _sprite((0, 255, 0))]
+        metrics = [assess_all(img) for img in sprites]
+        summary = summarize_metrics(metrics)
+        assert summary["total"] == 2
+        assert summary["clean_percent"] == 100.0
+        assert "tier_counts" in summary
+
+    def test_summarize_metrics_mixed_tiers(self):
+        from backend.modules.validation.metrics import assess_all
+        from backend.modules.validation.visual_report import summarize_metrics
+        clean = _sprite((100, 150, 200))
+        noisy_arr = np.zeros((64, 64, 4), dtype=np.uint8)
+        noisy_arr[:, :, 3] = 255
+        for y in range(64):
+            for x in range(64):
+                noisy_arr[y, x, :3] = [y * 4 % 256, x * 4 % 256, (y + x) * 2 % 256]
+        noisy = Image.fromarray(noisy_arr, "RGBA")
+        metrics = [assess_all(clean), assess_all(noisy)]
+        summary = summarize_metrics(metrics)
+        assert summary["total"] == 2
+        assert summary["clean_percent"] >= 0
+        assert len(summary["tier_counts"]) >= 1
+
+    def test_summarize_metrics_keys(self):
+        from backend.modules.validation.metrics import assess_all
+        from backend.modules.validation.visual_report import summarize_metrics
+        metrics = [assess_all(_sprite((50, 100, 200)))]
+        summary = summarize_metrics(metrics)
+        expected_keys = {"total", "tier_counts", "clean_percent", "avg_palette_size", "avg_sharpness", "avg_outline_continuity"}
+        assert expected_keys.issubset(summary.keys())
