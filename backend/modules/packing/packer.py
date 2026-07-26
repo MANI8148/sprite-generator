@@ -61,12 +61,52 @@ def sprite_sheet(
 
 def tileset(
     images: List[Image.Image],
+    cols: Optional[int] = None,
     tile_size: Optional[Tuple[int, int]] = None,
     padding: int = 1,
 ) -> Tuple[Image.Image, dict]:
+    if not images:
+        raise ValueError("No images to pack")
     if tile_size is None:
-        tile_size = images[0].size if images else (16, 16)
-    return sprite_sheet(images, padding=padding)
+        tile_size = images[0].size
+    tw, th = tile_size
+    resized = []
+    for img in images:
+        if img.size != (tw, th):
+            img = img.resize((tw, th), Image.NEAREST)
+        resized.append(img)
+    n = len(resized)
+    if cols is None:
+        cols = math.ceil(math.sqrt(n))
+    rows = math.ceil(n / cols)
+    sheet_w = cols * (tw + padding) + padding
+    sheet_h = rows * (th + padding) + padding
+    sheet = Image.new("RGBA", (sheet_w, sheet_h), (0, 0, 0, 0))
+    frames = []
+    for idx, img in enumerate(resized):
+        col = idx % cols
+        row = idx // cols
+        x = padding + col * (tw + padding)
+        y = padding + row * (th + padding)
+        sheet.paste(img, (x, y))
+        frames.append({
+            "index": idx,
+            "x": x, "y": y,
+            "w": tw, "h": th,
+            "col": col,
+            "row": row,
+        })
+    metadata = {
+        "type": "tileset",
+        "tile_size": {"w": tw, "h": th},
+        "size": {"w": sheet_w, "h": sheet_h},
+        "cols": cols,
+        "rows": rows,
+        "padding": padding,
+        "frame_count": n,
+        "frames": frames,
+    }
+    return sheet, metadata
 
 
 def animation_strip(
