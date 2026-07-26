@@ -55,12 +55,19 @@ class CreditManager:
             entry = ledger.get(user_id, {})
             return entry.get("balance", 0)
 
-    def get_transactions(self, user_id: str, limit: int = 50) -> list:
+    def get_transactions(self, user_id: str, limit: int = 50, reason: Optional[str] = None, min_amount: Optional[int] = None, max_amount: Optional[int] = None) -> list:
         with self._lock:
             ledger = self._load_ledger()
             entry = ledger.get(user_id, {})
             txs = entry.get("transactions", [])
-            return list(reversed(txs))[:limit]
+        filtered = list(reversed(txs))
+        if reason:
+            filtered = [t for t in filtered if t.get("reason") == reason]
+        if min_amount is not None:
+            filtered = [t for t in filtered if t.get("amount", 0) >= min_amount]
+        if max_amount is not None:
+            filtered = [t for t in filtered if t.get("amount", 0) <= max_amount]
+        return filtered[:limit]
 
     def add_credits(self, user_id: str, amount: int, reason: str = "topup") -> int:
         if amount <= 0:
@@ -123,6 +130,30 @@ class CreditManager:
                     "timestamp": txn.timestamp,
                 })
                 self._save_ledger(ledger)
+
+    def refund_credits(self, user_id: str, amount: int, original_txn_id: str = "", reason: str = "refund") -> int:
+        if amount <= 0:
+            raise ValueError("Amount must be positive")
+        with self._lock:
+            ledger = self._load_ledger()
+            entry = ledger.setdefault(user_id, {"balance": 0, "transactions": []})
+            entry["balance"] += amount
+            txn = TransactionRecord(
+                user_id=user_id,
+                amount=amount,
+                reason=reason,
+            )
+            txn_dict = {
+                "transaction_id": txn.transaction_id,
+                "amount": txn.amount,
+                "reason": txn.reason,
+                "timestamp": txn.timestamp,
+            }
+            if original_txn_id:
+                txn_dict["refunds_original_txn_id"] = original_txn_id
+            entry["transactions"].append(txn_dict)
+            self._save_ledger(ledger)
+            return entry["balance"]
 
     def get_generation_cost(self) -> int:
         return GENERATION_COST

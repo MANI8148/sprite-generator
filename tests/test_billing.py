@@ -170,6 +170,64 @@ class TestCreditManager:
         txs = cm.get_transactions("tx_user", limit=10)
         assert len(txs) == 10
 
+    def test_filter_transactions_by_reason(self):
+        cm = get_credit_manager()
+        cm.ensure_user_exists("filter_user")
+        cm.add_credits("filter_user", 100, reason="purchase")
+        cm.deduct_credits("filter_user", 10, reason="generation")
+        cm.add_credits("filter_user", 50, reason="bonus")
+        gen_txs = cm.get_transactions("filter_user", reason="generation")
+        assert len(gen_txs) == 1
+        assert gen_txs[0]["amount"] == -10
+        assert gen_txs[0]["reason"] == "generation"
+        purchase_txs = cm.get_transactions("filter_user", reason="purchase")
+        assert len(purchase_txs) == 1
+        assert purchase_txs[0]["amount"] == 100
+
+    def test_filter_transactions_by_limit_with_reason(self):
+        cm = get_credit_manager()
+        cm.ensure_user_exists("multi_tx")
+        for i in range(5):
+            cm.add_credits("multi_tx", 10, reason="test")
+            cm.deduct_credits("multi_tx", 5, reason="generation")
+        gen_txs = cm.get_transactions("multi_tx", limit=2, reason="generation")
+        assert len(gen_txs) == 2
+        for t in gen_txs:
+            assert t["reason"] == "generation"
+
+    def test_refund_credits_adds_balance(self):
+        cm = get_credit_manager()
+        cm.ensure_user_exists("refund_user")
+        cm.deduct_credits("refund_user", 30, reason="generation")
+        before = cm.get_balance("refund_user")
+        assert before == 70
+        new_bal = cm.refund_credits("refund_user", 30, reason="refund_generation_failed")
+        assert new_bal == 100
+        assert cm.get_balance("refund_user") == 100
+
+    def test_refund_credits_records_transaction(self):
+        cm = get_credit_manager()
+        cm.ensure_user_exists("refund_tx")
+        cm.deduct_credits("refund_tx", 50, reason="generation")
+        cm.refund_credits("refund_tx", 50, original_txn_id="txn_abc", reason="refund")
+        txs = cm.get_transactions("refund_tx")
+        assert len(txs) == 3
+        newest = txs[0]
+        assert newest["reason"] == "refund"
+        assert newest["amount"] == 50
+        assert newest.get("refunds_original_txn_id") == "txn_abc"
+
+    def test_refund_negative_amount_raises(self):
+        cm = get_credit_manager()
+        with pytest.raises(ValueError, match="Amount must be positive"):
+            cm.refund_credits("user_x", -10)
+
+    def test_refund_nonexistent_user_creates_entry(self):
+        cm = get_credit_manager()
+        bal = cm.refund_credits("new_user_refund", 100, reason="signup_bonus")
+        assert bal == 100
+        assert cm.get_balance("new_user_refund") == 100
+
 
 class TestBillingAPIAuth:
     def test_balance_requires_auth(self, unauthed_client):
@@ -241,6 +299,57 @@ class TestBillingAPI:
         data = resp.json()
         assert data["num_frames"] == 8
         assert data["total_cost"] == 8
+
+    def test_refund_endpoint_refunds_credits(self, authed_client):
+        resp = authed_client.post("/billing/refund", json={"amount": 30})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["amount_refunded"] == 30
+        assert data["balance"] == 130
+
+    def test_refund_endpoint_requires_auth(self, unauthed_client):
+        resp = unauthed_client.post("/billing/refund", json={"amount": 50})
+        assert resp.status_code == 401
+
+    def test_refund_endpoint_negative_amount_returns_422(self, authed_client):
+        resp = authed_client.post("/billing/refund", json={"amount": -10})
+        assert resp.status_code == 422
+
+    def test_refund_endpoint_zero_amount_returns_422(self, authed_client):
+        resp = authed_client.post("/billing/refund", json={"amount": 0})
+        assert resp.status_code == 422
+
+    def test_refund_endpoint_with_original_txn_id(self, authed_client):
+        txs = authed_client.get("/billing/transactions").json()["transactions"]
+        txn_id = txs[0]["transaction_id"]
+        resp = authed_client.post("/billing/refund", json={
+            "amount": 50,
+            "original_txn_id": txn_id,
+            "reason": "customer_refund",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["amount_refunded"] == 50
+        assert data["balance"] == 150
+
+    def test_refund_shows_in_transactions(self, authed_client):
+        authed_client.post("/billing/refund", json={"amount": 25, "reason": "adjustment"})
+        txs = authed_client.get("/billing/transactions").json()["transactions"]
+        refund_txs = [t for t in txs if t["reason"] == "adjustment"]
+        assert len(refund_txs) == 1
+        assert refund_txs[0]["amount"] == 25
+
+    def test_get_transactions_with_reason_filter(self, authed_client):
+        authed_client.post("/billing/topup", json={"amount": 50, "reason": "gift"})
+        txs = authed_client.get("/billing/transactions?reason=gift").json()["transactions"]
+        assert len(txs) == 1
+        assert txs[0]["reason"] == "gift"
+
+    def test_get_transactions_with_limit(self, authed_client):
+        for i in range(5):
+            authed_client.post("/billing/topup", json={"amount": 10, "reason": f"batch_{i}"})
+        txs = authed_client.get("/billing/transactions?limit=2").json()["transactions"]
+        assert len(txs) == 2
 
     def test_balance_isolation_between_users(self):
         pipe = AssetPipeline()

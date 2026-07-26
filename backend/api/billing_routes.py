@@ -44,6 +44,12 @@ class CostEstimateResponse(BaseModel):
     total_cost: int
 
 
+class RefundRequest(BaseModel):
+    amount: int
+    original_txn_id: str = ""
+    reason: str = "refund"
+
+
 @router.get("/balance", response_model=BalanceResponse)
 def get_balance(
     current_user: TokenData = Depends(get_current_user),
@@ -82,9 +88,11 @@ def topup(
 def get_transactions(
     current_user: TokenData = Depends(get_current_user),
     credits: CreditManager = Depends(get_credit_manager),
+    reason: Optional[str] = None,
+    limit: int = 50,
 ):
     credits.ensure_user_exists(current_user.user_id)
-    txs = credits.get_transactions(current_user.user_id)
+    txs = credits.get_transactions(current_user.user_id, limit=limit, reason=reason)
     return TransactionHistoryResponse(
         user_id=current_user.user_id,
         transactions=[TransactionEntry(**t) for t in txs],
@@ -102,6 +110,28 @@ def cost_estimate(
         num_frames=num_frames,
         total_cost=unit_cost * num_frames,
     )
+
+
+@router.post("/refund")
+def refund_credits(
+    req: RefundRequest,
+    current_user: TokenData = Depends(get_current_user),
+    credits: CreditManager = Depends(get_credit_manager),
+):
+    if req.amount <= 0:
+        raise HTTPException(status_code=422, detail="Amount must be positive")
+    credits.ensure_user_exists(current_user.user_id)
+    new_balance = credits.refund_credits(
+        current_user.user_id,
+        req.amount,
+        original_txn_id=req.original_txn_id,
+        reason=req.reason,
+    )
+    return {
+        "user_id": current_user.user_id,
+        "balance": new_balance,
+        "amount_refunded": req.amount,
+    }
 
 
 class PackageResponse(BaseModel):
