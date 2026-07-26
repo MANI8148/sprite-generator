@@ -144,12 +144,11 @@ def assess_all(image: Image.Image, batch: list = None) -> Dict:
     result["center_x"] = round(cx, 3)
     result["center_y"] = round(cy, 3)
     bbox = bounding_box(image)
-    if bbox:
-        result["bbox"] = {
-            "x": bbox[0], "y": bbox[1],
-            "w": bbox[2] - bbox[0], "h": bbox[3] - bbox[1],
-        }
-        result["bbox_area"] = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+    result["bbox"] = {
+        "x": bbox[0], "y": bbox[1],
+        "w": bbox[2] - bbox[0], "h": bbox[3] - bbox[1],
+    } if bbox else None
+    result["bbox_area"] = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]) if bbox else 0
     result["transparency_ratio"] = round(transparency_coverage(image), 3)
     result["outline_continuity"] = round(outline_continuity(image), 3)
     result["sharpness"] = round(pixel_sharpness(image), 1)
