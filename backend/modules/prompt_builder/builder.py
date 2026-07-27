@@ -92,3 +92,37 @@ def build_prompt(controls: AssetControls) -> str:
         prompt = f"{prompt}, {controls.custom_prompt}"
 
     return prompt
+
+
+def build_negative_prompt(controls: AssetControls) -> str:
+    parts = ["blurry, low quality, distorted, ugly, bad anatomy"]
+
+    if controls.asset_type == AssetType.CHARACTER:
+        parts.append("extra limbs, missing limbs, deformed face")
+    elif controls.asset_type in (AssetType.TILESET, AssetType.BUILDING):
+        parts.append("seams, borders, uneven edges, misaligned tiles")
+    elif controls.asset_type in (AssetType.UI, AssetType.ICON):
+        parts.append("text, words, letters, complex background, scene")
+    elif controls.asset_type == AssetType.ENEMY:
+        parts.append("extra limbs, malformed, inconsistent style")
+    elif controls.asset_type in (AssetType.VEHICLE, AssetType.PROP):
+        parts.append("deformed shape, broken perspective, floating parts")
+
+    if controls.animation in (Animation.WALK, Animation.RUN):
+        parts.append("static pose, stiff legs, no motion")
+    elif controls.animation == Animation.ATTACK:
+        parts.append("no weapon, static pose, missing action")
+    elif controls.animation == Animation.JUMP:
+        parts.append("standing on ground, no vertical motion")
+
+    if controls.palette == Palette.MONOCHROME:
+        parts.append("multiple colors, bright colors, gradients")
+    elif controls.palette in (Palette.RETRO_8, Palette.GAMEBOY):
+        parts.append("too many colors, smooth gradients, anti-aliasing")
+
+    if controls.sprite_size == SpriteSize.S_16:
+        parts.append("details too small for 16x16, over-detailed")
+    elif controls.sprite_size == SpriteSize.S_128:
+        parts.append("too simple for 128x128, under-detailed, empty space")
+
+    return ", ".join(parts)

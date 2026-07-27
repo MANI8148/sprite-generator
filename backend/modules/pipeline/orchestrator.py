@@ -7,7 +7,7 @@ import json
 import zipfile
 
 from ..prompt_builder.controls import AssetControls, AssetType, View, Animation
-from ..prompt_builder.builder import build_prompt
+from ..prompt_builder.builder import build_prompt, build_negative_prompt
 from ..postprocess.processor import (
     remove_background,
     reduce_palette,
@@ -77,7 +77,7 @@ class AssetPipeline:
 
         # 1. Build prompt
         prompt = build_prompt(controls)
-        neg_prompt = "blurry, low quality, distorted, bad anatomy, ugly"
+        neg_prompt = build_negative_prompt(controls)
 
         size_map = {"16x16": 128, "32x32": 256, "64x64": 512, "128x128": 1024}
         gen_size = size_map.get(controls.sprite_size.value, 512)

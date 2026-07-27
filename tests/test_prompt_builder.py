@@ -1,4 +1,4 @@
-from backend.modules.prompt_builder.builder import build_prompt
+from backend.modules.prompt_builder.builder import build_prompt, build_negative_prompt
 from backend.modules.prompt_builder.controls import (
     AssetControls, AssetType, View, Palette, Animation, SpriteSize,
 )
@@ -284,3 +284,143 @@ class TestAssetTypeVariants:
         controls = AssetControls(asset_type=AssetType.EFFECT, animation=Animation.NONE)
         prompt = build_prompt(controls)
         assert "effect" in prompt
+
+
+class TestBuildNegativePrompt:
+    def test_returns_string(self):
+        controls = AssetControls()
+        neg = build_negative_prompt(controls)
+        assert isinstance(neg, str)
+        assert len(neg) > 0
+
+    def test_includes_common_negatives(self):
+        controls = AssetControls()
+        neg = build_negative_prompt(controls)
+        assert "blurry" in neg
+        assert "low quality" in neg
+        assert "distorted" in neg
+
+    def test_character_adds_limb_negatives(self):
+        controls = AssetControls(asset_type=AssetType.CHARACTER)
+        neg = build_negative_prompt(controls)
+        assert "extra limbs" in neg
+
+    def test_enemy_adds_malformed_negative(self):
+        controls = AssetControls(asset_type=AssetType.ENEMY)
+        neg = build_negative_prompt(controls)
+        assert "malformed" in neg
+
+    def test_tileset_adds_seam_negatives(self):
+        controls = AssetControls(asset_type=AssetType.TILESET)
+        neg = build_negative_prompt(controls)
+        assert "seams" in neg
+
+    def test_ui_adds_text_negative(self):
+        controls = AssetControls(asset_type=AssetType.UI)
+        neg = build_negative_prompt(controls)
+        assert "text" in neg
+
+    def test_vehicle_adds_deformed_negative(self):
+        controls = AssetControls(asset_type=AssetType.VEHICLE)
+        neg = build_negative_prompt(controls)
+        assert "deformed shape" in neg
+
+    def test_building_adds_seam_negatives(self):
+        controls = AssetControls(asset_type=AssetType.BUILDING)
+        neg = build_negative_prompt(controls)
+        assert "seams" in neg
+
+    def test_prop_adds_broken_perspective_negative(self):
+        controls = AssetControls(asset_type=AssetType.PROP)
+        neg = build_negative_prompt(controls)
+        assert "broken perspective" in neg
+
+    def test_walk_animation_adds_motion_negative(self):
+        controls = AssetControls(animation=Animation.WALK)
+        neg = build_negative_prompt(controls)
+        assert "static pose" in neg
+
+    def test_run_animation_adds_motion_negative(self):
+        controls = AssetControls(animation=Animation.RUN)
+        neg = build_negative_prompt(controls)
+        assert "static pose" in neg
+
+    def test_attack_animation_adds_weapon_negative(self):
+        controls = AssetControls(animation=Animation.ATTACK)
+        neg = build_negative_prompt(controls)
+        assert "no weapon" in neg
+
+    def test_jump_animation_adds_vertical_negative(self):
+        controls = AssetControls(animation=Animation.JUMP)
+        neg = build_negative_prompt(controls)
+        assert "no vertical motion" in neg
+
+    def test_idle_does_not_add_motion_negative(self):
+        controls = AssetControls(animation=Animation.IDLE)
+        neg = build_negative_prompt(controls)
+        assert "static pose" not in neg
+
+    def test_monochrome_palette_adds_color_negative(self):
+        controls = AssetControls(palette=Palette.MONOCHROME)
+        neg = build_negative_prompt(controls)
+        assert "multiple colors" in neg
+
+    def test_gameboy_palette_adds_color_negative(self):
+        controls = AssetControls(palette=Palette.GAMEBOY)
+        neg = build_negative_prompt(controls)
+        assert "too many colors" in neg
+
+    def test_retro_8_palette_adds_color_negative(self):
+        controls = AssetControls(palette=Palette.RETRO_8)
+        neg = build_negative_prompt(controls)
+        assert "too many colors" in neg
+
+    def test_16x16_adds_detail_negative(self):
+        controls = AssetControls(sprite_size=SpriteSize.S_16)
+        neg = build_negative_prompt(controls)
+        assert "over-detailed" in neg
+
+    def test_128x128_adds_simple_negative(self):
+        controls = AssetControls(sprite_size=SpriteSize.S_128)
+        neg = build_negative_prompt(controls)
+        assert "under-detailed" in neg
+
+    def test_32x32_does_not_add_size_negative(self):
+        controls = AssetControls(sprite_size=SpriteSize.S_32)
+        neg = build_negative_prompt(controls)
+        assert "over-detailed" not in neg
+        assert "under-detailed" not in neg
+
+    def test_auto_palette_does_not_add_color_negative(self):
+        controls = AssetControls(palette=Palette.AUTO)
+        neg = build_negative_prompt(controls)
+        assert "multiple colors" not in neg
+
+    def test_snes_palette_does_not_add_color_negative(self):
+        controls = AssetControls(palette=Palette.SNES)
+        neg = build_negative_prompt(controls)
+        assert "too many colors" not in neg
+
+    def test_animation_none_does_not_add_action_negative(self):
+        controls = AssetControls(animation=Animation.NONE)
+        neg = build_negative_prompt(controls)
+        assert "static pose" not in neg
+        assert "no weapon" not in neg
+
+    def test_hurt_does_not_add_action_negative(self):
+        controls = AssetControls(animation=Animation.HURT)
+        neg = build_negative_prompt(controls)
+        assert "static pose" not in neg
+
+    def test_icon_adds_text_negative(self):
+        controls = AssetControls(asset_type=AssetType.ICON)
+        neg = build_negative_prompt(controls)
+        assert "text" in neg
+
+    def test_weapon_default_no_specific_negative(self):
+        controls = AssetControls(asset_type=AssetType.WEAPON)
+        neg = build_negative_prompt(controls)
+        assert "blurry" in neg
+        assert "extra limbs" not in neg
+        assert "seams" not in neg
+        assert "text" not in neg
