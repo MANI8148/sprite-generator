@@ -103,7 +103,7 @@ class SpriteLoRAWrapper(nn.Module):
         x = F.relu(self.deconv1(x))
         x = F.relu(self.deconv2(x))
         x = F.relu(self.deconv3(x))
-        x = self.deconv_out(x)
+        x = torch.sigmoid(self.deconv_out(x))
         return x
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
@@ -120,7 +120,7 @@ class SpriteLoRAWrapper(nn.Module):
         x = F.relu(self.deconv1(z))
         x = F.relu(self.deconv2(x))
         x = F.relu(self.deconv3(x))
-        x = self.deconv_out(x)
+        x = torch.sigmoid(self.deconv_out(x))
         return x
 
     def generate(self, num_samples: int, device: str = "cpu") -> torch.Tensor:
