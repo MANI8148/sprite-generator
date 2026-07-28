@@ -16,7 +16,7 @@ from backend.modules.tasks.queue import TaskQueue, get_task_queue, JobStatus
 from backend.modules.style_engine import StyleEngine, STYLE_PRESETS
 from backend.modules.asset_memory import compute_generation_hash
 from backend.modules.auth import OptionalAuth, TokenData
-from backend.modules.billing import CreditManager, get_credit_manager
+from backend.modules.billing import CreditManager, get_credit_manager, UsageTracker, get_usage_tracker
 from backend.modules.project_director import ProjectDirector, ProjectPlan
 
 router = APIRouter()
@@ -339,6 +339,8 @@ def _deduct_credits_for_job(user_id, num_frames, credits):
         return
     cost = credits.get_generation_cost() * max(1, num_frames)
     credits.deduct_credits(user_id, cost, reason="generation")
+    usage = get_usage_tracker()
+    usage.record_generation(user_id, cost)
 
 
 def _run_generation_job(pipe, controls, req, output_dir, job_id, user_id=None):

@@ -155,6 +155,14 @@ class CreditManager:
             self._save_ledger(ledger)
             return entry["balance"]
 
+    def list_all_users(self) -> list:
+        with self._lock:
+            ledger = self._load_ledger()
+            return [
+                {"user_id": uid, "balance": entry.get("balance", 0)}
+                for uid, entry in ledger.items()
+            ]
+
     def get_generation_cost(self) -> int:
         return GENERATION_COST
 

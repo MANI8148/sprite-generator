@@ -1,12 +1,22 @@
+import os
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from pydantic import BaseModel
 from typing import Optional
 
 from backend.modules.auth import get_current_user, OptionalAuth, TokenData
 from backend.modules.billing import CreditManager, get_credit_manager
+from backend.modules.billing.usage import UsageTracker, get_usage_tracker
 from backend.modules.billing.payments import StripePaymentGateway, get_payment_gateway, CREDIT_PACKAGES
 
 router = APIRouter(prefix="/billing", tags=["billing"])
+
+ADMIN_USERNAME = os.environ.get("BILLING_ADMIN_USERNAME", "admin")
+
+
+def require_admin(current_user: TokenData = Depends(get_current_user)):
+    if current_user.username != ADMIN_USERNAME:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
 
 
 class BalanceResponse(BaseModel):
@@ -225,3 +235,79 @@ async def stripe_webhook(
         credits_added=result["credits"],
         user_id=result["user_id"],
     )
+
+
+class UserBalanceEntry(BaseModel):
+    user_id: str
+    balance: int
+
+
+class AllUsersResponse(BaseModel):
+    users: list
+
+
+@router.get("/admin/users")
+def admin_list_users(
+    current_user: TokenData = Depends(require_admin),
+    credits: CreditManager = Depends(get_credit_manager),
+):
+    users = credits.list_all_users()
+    return AllUsersResponse(users=[UserBalanceEntry(**u) for u in users])
+
+
+class AdminAdjustRequest(BaseModel):
+    user_id: str
+    amount: int
+    reason: str = "admin_adjustment"
+
+
+class AdminAdjustResponse(BaseModel):
+    user_id: str
+    balance: int
+    amount_changed: int
+
+
+@router.post("/admin/adjust")
+def admin_adjust_credits(
+    req: AdminAdjustRequest,
+    current_user: TokenData = Depends(require_admin),
+    credits: CreditManager = Depends(get_credit_manager),
+):
+    if req.amount == 0:
+        raise HTTPException(status_code=422, detail="Amount must not be zero")
+    credits.ensure_user_exists(req.user_id)
+    if req.amount > 0:
+        new_bal = credits.add_credits(req.user_id, req.amount, reason=req.reason)
+    else:
+        success = credits.deduct_credits(req.user_id, abs(req.amount), reason=req.reason)
+        if not success:
+            raise HTTPException(status_code=400, detail="Insufficient credits")
+        new_bal = credits.get_balance(req.user_id)
+    return AdminAdjustResponse(user_id=req.user_id, balance=new_bal, amount_changed=req.amount)
+
+
+class UsageSummaryResponse(BaseModel):
+    user_id: str
+    daily: dict
+    monthly: dict
+    all_time: dict
+
+
+class SystemUsageResponse(BaseModel):
+    total_generations: int
+    total_credits_used: int
+
+
+@router.get("/admin/usage")
+def admin_usage(
+    current_user: TokenData = Depends(require_admin),
+    usage: UsageTracker = Depends(get_usage_tracker),
+    user_id: Optional[str] = None,
+):
+    if user_id:
+        daily = usage.get_user_daily_usage(user_id)
+        monthly = usage.get_user_monthly_usage(user_id)
+        all_time = usage.get_user_all_usage(user_id)
+        return UsageSummaryResponse(user_id=user_id, daily=daily, monthly=monthly, all_time=all_time)
+    totals = usage.get_system_totals()
+    return SystemUsageResponse(**totals)

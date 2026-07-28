@@ -5,6 +5,7 @@ from backend.modules.billing.payments import (
     set_payment_gateway,
     CREDIT_PACKAGES,
 )
+from backend.modules.billing.usage import UsageTracker, get_usage_tracker, set_usage_tracker
 
 __all__ = [
     "CreditManager",
@@ -14,4 +15,7 @@ __all__ = [
     "get_payment_gateway",
     "set_payment_gateway",
     "CREDIT_PACKAGES",
+    "UsageTracker",
+    "get_usage_tracker",
+    "set_usage_tracker",
 ]

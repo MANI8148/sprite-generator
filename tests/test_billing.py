@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
-from backend.modules.billing import CreditManager, get_credit_manager, set_credit_manager
+from backend.modules.billing import CreditManager, get_credit_manager, set_credit_manager, UsageTracker, get_usage_tracker, set_usage_tracker
 from backend.modules.billing.payments import StripePaymentGateway, set_payment_gateway, get_payment_gateway, CREDIT_PACKAGES
 from backend.modules.auth import AuthHandler, set_auth_handler, get_auth_handler
 from backend.modules.rate_limiter import RateLimiter, set_rate_limiter, get_rate_limiter
@@ -727,3 +727,283 @@ class TestPaymentAPI:
             assert resp.status_code == 503
         finally:
             set_payment_gateway(old_gw)
+
+
+class TestUsageTracker:
+    def test_initial_usage_is_zero(self):
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        ut = UsageTracker(path=os.path.join(tmp, "usage.json"))
+        assert ut.get_user_daily_usage("user_x") == {"generations": 0, "credits_used": 0}
+        assert ut.get_user_monthly_usage("user_x") == {"generations": 0, "credits_used": 0}
+
+    def test_record_generation_increments(self):
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        ut = UsageTracker(path=os.path.join(tmp, "usage.json"))
+        ut.record_generation("user_a", 5)
+        assert ut.get_user_daily_usage("user_a") == {"generations": 1, "credits_used": 5}
+
+    def test_multiple_generations_accumulate(self):
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        ut = UsageTracker(path=os.path.join(tmp, "usage.json"))
+        ut.record_generation("user_a", 3)
+        ut.record_generation("user_a", 7)
+        daily = ut.get_user_daily_usage("user_a")
+        assert daily["generations"] == 2
+        assert daily["credits_used"] == 10
+
+    def test_separate_users_independent(self):
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        ut = UsageTracker(path=os.path.join(tmp, "usage.json"))
+        ut.record_generation("user_a", 10)
+        ut.record_generation("user_b", 20)
+        assert ut.get_user_daily_usage("user_a") == {"generations": 1, "credits_used": 10}
+        assert ut.get_user_daily_usage("user_b") == {"generations": 1, "credits_used": 20}
+
+    def test_system_totals(self):
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        ut = UsageTracker(path=os.path.join(tmp, "usage.json"))
+        ut.record_generation("user_a", 10)
+        ut.record_generation("user_b", 20)
+        totals = ut.get_system_totals()
+        assert totals["total_generations"] == 2
+        assert totals["total_credits_used"] == 30
+
+    def test_get_all_user_ids(self):
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        ut = UsageTracker(path=os.path.join(tmp, "usage.json"))
+        ut.record_generation("user_a", 1)
+        ut.record_generation("user_b", 1)
+        assert sorted(ut.get_all_user_ids()) == ["user_a", "user_b"]
+
+    def test_get_user_all_usage_structure(self):
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        ut = UsageTracker(path=os.path.join(tmp, "usage.json"))
+        ut.record_generation("user_a", 5)
+        ut.record_generation("user_a", 3)
+        all_usage = ut.get_user_all_usage("user_a")
+        assert all_usage["total"]["generations"] == 2
+        assert all_usage["total"]["credits_used"] == 8
+        assert len(all_usage["days"]) == 1
+
+    def test_persistence(self):
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        path = os.path.join(tmp, "usage.json")
+        ut1 = UsageTracker(path=path)
+        ut1.record_generation("user_persist", 7)
+        ut2 = UsageTracker(path=path)
+        assert ut2.get_user_daily_usage("user_persist") == {"generations": 1, "credits_used": 7}
+        assert ut2.get_system_totals()["total_generations"] == 1
+
+    def test_date_specific_query(self):
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        ut = UsageTracker(path=os.path.join(tmp, "usage.json"))
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        ut.record_generation("user_date", 5)
+        result = ut.get_user_daily_usage("user_date", date=today)
+        assert result["generations"] == 1
+        result_wrong = ut.get_user_daily_usage("user_date", date="2099-01-01")
+        assert result_wrong["generations"] == 0
+
+
+class TestBillingAdminAPI:
+    def test_admin_list_users_requires_admin(self, unauthed_client):
+        resp = unauthed_client.get("/billing/admin/users")
+        assert resp.status_code == 401
+
+    def test_admin_list_users_non_admin_returns_403(self, authed_client):
+        resp = authed_client.get("/billing/admin/users")
+        assert resp.status_code == 403
+
+    def test_admin_list_users_as_admin(self):
+        pipe = AssetPipeline()
+        from tests.test_api import FakeGenerator
+        pipe.set_generator(FakeGenerator(num_images=1))
+        set_pipeline(pipe)
+        set_generator_loaded(True)
+
+        tc = TestClient(app)
+        token = self._register_admin(tc)
+
+        resp = tc.get("/billing/admin/users", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "users" in data
+        assert len(data["users"]) >= 0
+
+    def _register_admin(self, tc):
+        r = tc.post("/auth/register", json={"username": "admin", "password": "adminpass123"})
+        assert r.status_code == 201
+        return r.json()["access_token"]
+
+    def test_admin_adjust_adds_credits(self):
+        pipe = AssetPipeline()
+        from tests.test_api import FakeGenerator
+        pipe.set_generator(FakeGenerator(num_images=1))
+        set_pipeline(pipe)
+        set_generator_loaded(True)
+
+        tc = TestClient(app)
+        admin_token = self._register_admin(tc)
+
+        resp = tc.post(
+            "/billing/admin/adjust",
+            json={"user_id": "target_user_adj1", "amount": 200, "reason": "admin_grant"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["amount_changed"] == 200
+        assert data["balance"] >= 200
+
+    def test_admin_adjust_deducts_credits(self):
+        pipe = AssetPipeline()
+        from tests.test_api import FakeGenerator
+        pipe.set_generator(FakeGenerator(num_images=1))
+        set_pipeline(pipe)
+        set_generator_loaded(True)
+
+        tc = TestClient(app)
+        admin_token = self._register_admin(tc)
+
+        cm = get_credit_manager()
+        cm.ensure_user_exists("deduct_target")
+        cm.add_credits("deduct_target", 100)
+        before = cm.get_balance("deduct_target")
+
+        resp = tc.post(
+            "/billing/admin/adjust",
+            json={"user_id": "deduct_target", "amount": -30, "reason": "penalty"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["amount_changed"] == -30
+        assert data["balance"] == before - 30
+
+    def test_admin_adjust_zero_returns_422(self):
+        pipe = AssetPipeline()
+        from tests.test_api import FakeGenerator
+        pipe.set_generator(FakeGenerator(num_images=1))
+        set_pipeline(pipe)
+        set_generator_loaded(True)
+
+        tc = TestClient(app)
+        admin_token = self._register_admin(tc)
+
+        resp = tc.post(
+            "/billing/admin/adjust",
+            json={"user_id": "someuser", "amount": 0},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert resp.status_code == 422
+
+    def test_admin_usage_requires_admin(self, unauthed_client):
+        resp = unauthed_client.get("/billing/admin/usage")
+        assert resp.status_code == 401
+
+    def test_admin_usage_returns_system_totals(self):
+        pipe = AssetPipeline()
+        from tests.test_api import FakeGenerator
+        pipe.set_generator(FakeGenerator(num_images=1))
+        set_pipeline(pipe)
+        set_generator_loaded(True)
+
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        ut = UsageTracker(path=os.path.join(tmp, "usage_admin.json"))
+        old_tracker = get_usage_tracker()
+        set_usage_tracker(ut)
+        try:
+            ut.record_generation("user1", 10)
+            ut.record_generation("user2", 20)
+
+            tc = TestClient(app)
+            admin_token = self._register_admin(tc)
+
+            resp = tc.get("/billing/admin/usage", headers={"Authorization": f"Bearer {admin_token}"})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["total_generations"] == 2
+            assert data["total_credits_used"] == 30
+        finally:
+            set_usage_tracker(old_tracker)
+
+    def test_admin_usage_with_user_id(self):
+        pipe = AssetPipeline()
+        from tests.test_api import FakeGenerator
+        pipe.set_generator(FakeGenerator(num_images=1))
+        set_pipeline(pipe)
+        set_generator_loaded(True)
+
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        ut = UsageTracker(path=os.path.join(tmp, "usage_user.json"))
+        old_tracker = get_usage_tracker()
+        set_usage_tracker(ut)
+        try:
+            ut.record_generation("specific_user", 15)
+
+            tc = TestClient(app)
+            admin_token = self._register_admin(tc)
+
+            resp = tc.get(
+                "/billing/admin/usage?user_id=specific_user",
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["user_id"] == "specific_user"
+            assert data["daily"]["generations"] == 1
+            assert data["daily"]["credits_used"] == 15
+            assert data["monthly"]["generations"] == 1
+            assert data["all_time"]["total"]["generations"] == 1
+        finally:
+            set_usage_tracker(old_tracker)
+
+    def test_generation_records_usage(self):
+        pipe = AssetPipeline()
+        from tests.test_api import FakeGenerator
+        pipe.set_generator(FakeGenerator(num_images=1))
+        set_pipeline(pipe)
+        set_generator_loaded(True)
+
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        ut = UsageTracker(path=os.path.join(tmp, "usage_gen.json"))
+        old_tracker = get_usage_tracker()
+        set_usage_tracker(ut)
+        try:
+            tc = TestClient(app)
+            r = tc.post("/auth/register", json={"username": "gen_user1", "password": "genpass123"})
+            assert r.status_code == 201
+            token = r.json()["access_token"]
+            tc.headers = {"Authorization": f"Bearer {token}"}
+
+            resp = tc.post("/generate", json={
+                "asset_type": "character",
+                "num_frames": 2,
+            })
+            assert resp.status_code == 202
+            job_id = resp.json()["job_id"]
+
+            from tests.test_api import poll_job
+            poll_job(tc, job_id)
+
+            bal = tc.get("/billing/balance").json()
+            assert bal["balance"] == 98
+
+            usage = ut.get_user_daily_usage(bal["user_id"])
+            assert usage["generations"] == 1
+            assert usage["credits_used"] == 2
+        finally:
+            set_usage_tracker(old_tracker)
