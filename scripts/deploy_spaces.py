@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def collect_files(source_dirs: list[Path], flatten_dirs: set[str] | None = None) -> list[tuple[str, str]]:
@@ -21,6 +21,7 @@ def collect_files(source_dirs: list[Path], flatten_dirs: set[str] | None = None)
         flatten_dirs = set()
     files = []
     for src_dir in source_dirs:
+        src_dir = src_dir.resolve()
         if not src_dir.exists():
             print(f"Warning: {src_dir} does not exist, skipping", file=sys.stderr)
             continue
