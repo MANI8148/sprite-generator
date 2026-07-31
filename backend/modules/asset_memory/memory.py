@@ -37,6 +37,7 @@ def compute_generation_hash(
             "ip_adapter_scale": config.ip_adapter_scale,
             "reference_image": config.reference_image,
             "pack_sheet": config.pack_sheet,
+            "pack_tileset": config.pack_tileset,
             "export_engine": config.export_engine,
             "export_zip": config.export_zip,
         },

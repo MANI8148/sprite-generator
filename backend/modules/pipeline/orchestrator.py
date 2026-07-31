@@ -1,5 +1,5 @@
 from PIL import Image
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass, field
 import tempfile
 import os
@@ -45,6 +45,7 @@ class PipelineConfig:
     ip_adapter_scale: float = 0.6
     reference_image: Optional[str] = None
     pack_sheet: bool = True
+    pack_tileset: bool = False
     export_engine: str = "godot"
     export_zip: bool = True
 
@@ -133,9 +134,12 @@ class AssetPipeline:
 
         # 5. Export
         paths = []
+        tileset_meta = None
         if self.config.pack_sheet and len(processed) > 1:
             names = [f"{controls.asset_type.value}_{controls.animation.value}_{i}" for i in range(len(processed))]
-            if controls.animation != Animation.NONE:
+            if self.config.pack_tileset or controls.asset_type == AssetType.TILESET:
+                paths, tileset_meta = self._export_tileset(processed, controls, output_dir)
+            elif controls.animation != Animation.NONE:
                 paths = export_animation(
                     processed, output_dir, names[0], engine=self.config.export_engine
                 )
@@ -171,6 +175,8 @@ class AssetPipeline:
             "validation": validation,
             "outputs": paths,
         }
+        if tileset_meta is not None:
+            meta["tileset"] = tileset_meta
         meta_path = os.path.join(output_dir, "metadata.json")
         with open(meta_path, "w") as f:
             json.dump(meta, f, indent=2)
@@ -188,3 +194,27 @@ class AssetPipeline:
             output_paths=paths,
             zip_path=zip_path,
         )
+
+    def _export_tileset(
+        self,
+        images: List[Image.Image],
+        controls: AssetControls,
+        output_dir: str,
+    ) -> Tuple[List[str], dict]:
+        """Pack multiple images into a tileset sheet + JSON metadata.
+
+        Uses packer.tileset() so output carries per-tile grid metadata
+        (col/row/position), matching the tileset packing in the ROADMAP
+        structure (packing: sprite sheet, tileset, animation strip).
+        """
+        from ..packing.packer import tileset
+        name = f"{controls.asset_type.value}_tileset"
+        sheet, tile_meta = tileset(images, padding=1)
+        tile_meta = dict(tile_meta)
+        tile_meta["name"] = name
+        sheet_path = os.path.join(output_dir, f"{name}.png")
+        sheet.save(sheet_path)
+        meta_path = os.path.join(output_dir, f"{name}.json")
+        with open(meta_path, "w") as f:
+            json.dump(tile_meta, f, indent=2)
+        return [sheet_path, meta_path], tile_meta

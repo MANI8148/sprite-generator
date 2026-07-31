@@ -115,6 +115,7 @@ class GenerateRequest(BaseModel):
     palette_lock: bool = False
     palette_name: str = "retro_16"
     style_preset: str = ""
+    pack_tileset: bool = False
 
 
 class BatchItem(BaseModel):
@@ -137,6 +138,7 @@ class BatchItem(BaseModel):
     palette_lock: bool = False
     palette_name: str = "retro_16"
     style_preset: str = ""
+    pack_tileset: bool = False
 
 
 class BatchGenerateRequest(BaseModel):
@@ -360,6 +362,7 @@ def _run_generation_job(pipe, controls, req, output_dir, job_id, user_id=None):
     config.use_realesrgan = req.use_realesrgan
     config.export_engine = req.engine
     config.pack_sheet = req.num_frames > 1
+    config.pack_tileset = req.pack_tileset
     config.palette_lock = req.palette_lock
     config.palette_name = req.palette_name
     if req.style_preset:
@@ -562,6 +565,7 @@ def _run_batch_item(pipe, item, output_dir, batch_id, user_id=None):
     config.use_realesrgan = item.use_realesrgan
     config.export_engine = item.engine
     config.pack_sheet = item.num_frames > 1
+    config.pack_tileset = item.pack_tileset
     config.palette_lock = item.palette_lock
     config.palette_name = item.palette_name
     if item.style_preset:
