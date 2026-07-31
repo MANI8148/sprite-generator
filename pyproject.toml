@@ -40,6 +40,7 @@ dependencies = [
     "stripe>=7.0.0",
     "fastapi>=0.100.0",
     "uvicorn>=0.23.0",
+    "psycopg2-binary>=2.9.0",
     "rembg>=0.3.0",
     "httpx>=0.24.0",
     "pytest>=7.4.0",

@@ -1,6 +1,22 @@
 version: "3.9"
 
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=sprite_gen
+      - POSTGRES_USER=sprite_gen
+      - POSTGRES_PASSWORD=sprite_gen
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sprite_gen"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: .
@@ -10,8 +26,12 @@ services:
     environment:
       - RATE_LIMIT_MAX_REQUESTS=60
       - RATE_LIMIT_WINDOW_SECONDS=60
+      - DATABASE_URL=postgresql://sprite_gen:sprite_gen@db:5432/sprite_gen
     volumes:
       - ./data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
 
   frontend:
     build:
@@ -33,6 +53,10 @@ services:
     environment:
       - RATE_LIMIT_MAX_REQUESTS=1000
       - RATE_LIMIT_WINDOW_SECONDS=60
+      - DATABASE_URL=postgresql://sprite_gen:sprite_gen@db:5432/sprite_gen
     volumes:
       - ./tests:/app/tests
       - ./scripts/ci.yml:/app/scripts/ci.yml
+
+volumes:
+  postgres_data:
