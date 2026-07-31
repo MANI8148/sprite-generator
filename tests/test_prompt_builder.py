@@ -424,3 +424,78 @@ class TestBuildNegativePrompt:
         assert "extra limbs" not in neg
         assert "seams" not in neg
         assert "text" not in neg
+
+
+class TestStyleControl:
+    def test_default_style_leaves_prompt_unchanged(self):
+        controls = AssetControls(animation=Animation.NONE)
+        prompt = build_prompt(controls)
+        assert "RPG pixel art" not in prompt
+        assert "retro 8-bit" not in prompt
+        assert "modern pixel art" not in prompt
+
+    def test_rpg_style_adds_style_keywords(self):
+        controls = AssetControls(style="rpg", animation=Animation.NONE)
+        prompt = build_prompt(controls)
+        assert "RPG pixel art style" in prompt
+        assert "classic JRPG aesthetic" in prompt
+
+    def test_retro_style_adds_style_keywords(self):
+        controls = AssetControls(style="retro", animation=Animation.NONE)
+        prompt = build_prompt(controls)
+        assert "retro 8-bit pixel art" in prompt
+
+    def test_modern_style_adds_style_keywords(self):
+        controls = AssetControls(style="modern", animation=Animation.NONE)
+        prompt = build_prompt(controls)
+        assert "modern pixel art" in prompt
+
+    def test_custom_style_falls_back_to_literal(self):
+        controls = AssetControls(style="watercolor", animation=Animation.NONE)
+        prompt = build_prompt(controls)
+        assert "watercolor style" in prompt
+
+    def test_style_is_case_insensitive(self):
+        controls = AssetControls(style="RPG", animation=Animation.NONE)
+        prompt = build_prompt(controls)
+        assert "RPG pixel art style" in prompt
+
+    def test_style_combined_with_other_controls(self):
+        controls = AssetControls(
+            asset_type=AssetType.ENEMY,
+            view=View.SIDE,
+            animation=Animation.ATTACK,
+            theme="dungeon",
+            style="rpg",
+        )
+        prompt = build_prompt(controls)
+        assert "enemy" in prompt
+        assert "attack" in prompt
+        assert "dungeon" in prompt
+        assert "RPG pixel art style" in prompt
+
+
+class TestAssetTypeNegativePrompts:
+    def test_tree_negative_prompt(self):
+        neg = build_negative_prompt(AssetControls(asset_type=AssetType.TREE))
+        assert "unnatural colors" in neg
+        assert "deformed canopy" in neg
+
+    def test_road_negative_prompt(self):
+        neg = build_negative_prompt(AssetControls(asset_type=AssetType.ROAD))
+        assert "misaligned segments" in neg
+        assert "gaps" in neg
+
+    def test_projectile_negative_prompt(self):
+        neg = build_negative_prompt(AssetControls(asset_type=AssetType.PROJECTILE))
+        assert "wrong trajectory" in neg
+
+    def test_effect_negative_prompt(self):
+        neg = build_negative_prompt(AssetControls(asset_type=AssetType.EFFECT))
+        assert "no glow" in neg
+
+    def test_remaining_types_keep_common_negatives(self):
+        for asset_type in (AssetType.TREE, AssetType.ROAD, AssetType.PROJECTILE, AssetType.EFFECT):
+            neg = build_negative_prompt(AssetControls(asset_type=asset_type))
+            assert "blurry" in neg
+            assert "low quality" in neg

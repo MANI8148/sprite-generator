@@ -19,6 +19,7 @@ def compute_generation_hash(
             "palette": controls.palette.value,
             "sprite_size": controls.sprite_size.value,
             "theme": controls.theme,
+            "style": controls.style,
             "seed": controls.seed,
             "remove_bg": config.remove_bg,
             "reduce_palette": config.reduce_palette,

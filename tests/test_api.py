@@ -184,6 +184,27 @@ class TestGenerate:
         assert "validation" in result
         assert "output_paths" in result
 
+    def test_generate_accepts_style_control(self, client):
+        resp = client.post("/generate", json={
+            "asset_type": "character",
+            "view": "front",
+            "style": "rpg",
+        })
+        assert resp.status_code == 202
+        data = resp.json()
+        result = poll_job(client, data["job_id"])
+        assert result["status"] == "done"
+        assert "RPG pixel art" in result["prompt"]
+
+    def test_generate_default_style_excludes_specific_style_keywords(self, client):
+        resp = client.post("/generate", json={"asset_type": "character"})
+        assert resp.status_code == 202
+        data = resp.json()
+        result = poll_job(client, data["job_id"])
+        assert result["status"] == "done"
+        assert "RPG pixel art" not in result["prompt"]
+        assert "retro 8-bit" not in result["prompt"]
+
 
 class TestDownload:
     def test_download_existing_job_returns_zip(self, client):

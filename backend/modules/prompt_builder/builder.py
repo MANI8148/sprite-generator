@@ -48,10 +48,7 @@ def build_prompt(controls: AssetControls) -> str:
     parts = []
 
     # Asset type
-    if controls.asset_type == AssetType.CHARACTER:
-        parts.append(f"a pixel art {controls.asset_type.value}")
-    else:
-        parts.append(f"a pixel art {controls.asset_type.value}")
+    parts.append(f"a pixel art {controls.asset_type.value}")
 
     # Animation / action
     if controls.animation != Animation.NONE:
@@ -79,6 +76,13 @@ def build_prompt(controls: AssetControls) -> str:
         parts.append(size_str)
 
     # Style
+    if controls.style and controls.style.lower() != "pixel art":
+        style_str = STYLE_MAP.get(controls.style.lower())
+        if style_str:
+            parts.append(style_str)
+        else:
+            parts.append(f"{controls.style} style")
+
     parts.append("pixel art style, hard edges, flat colors, clean outlines")
 
     # Background
@@ -107,6 +111,14 @@ def build_negative_prompt(controls: AssetControls) -> str:
         parts.append("extra limbs, malformed, inconsistent style")
     elif controls.asset_type in (AssetType.VEHICLE, AssetType.PROP):
         parts.append("deformed shape, broken perspective, floating parts")
+    elif controls.asset_type == AssetType.TREE:
+        parts.append("unnatural colors, deformed canopy, floating, bare branches")
+    elif controls.asset_type == AssetType.ROAD:
+        parts.append("gaps, misaligned segments, uneven edges")
+    elif controls.asset_type == AssetType.PROJECTILE:
+        parts.append("blurry trail, wrong trajectory, static")
+    elif controls.asset_type == AssetType.EFFECT:
+        parts.append("flat, static, low energy, no glow")
 
     if controls.animation in (Animation.WALK, Animation.RUN):
         parts.append("static pose, stiff legs, no motion")

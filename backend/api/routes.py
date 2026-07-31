@@ -102,6 +102,7 @@ class GenerateRequest(BaseModel):
     palette: str = "auto"
     sprite_size: str = "32x32"
     theme: str = ""
+    style: str = "pixel art"
     seed: int = -1
     remove_bg: bool = True
     reduce_palette: bool = True
@@ -125,6 +126,7 @@ class BatchItem(BaseModel):
     palette: str = "auto"
     sprite_size: str = "32x32"
     theme: str = ""
+    style: str = "pixel art"
     seed: int = -1
     num_frames: int = 1
     remove_bg: bool = True
@@ -409,7 +411,7 @@ def _run_generation_job(pipe, controls, req, output_dir, job_id, user_id=None):
 
     _upload_to_r2(_r2_storage, job_id, result.output_paths, result.zip_path)
 
-    meta = {"view": req.view, "animation": req.animation, "palette": req.palette, "sprite_size": req.sprite_size}
+    meta = {"view": req.view, "animation": req.animation, "palette": req.palette, "sprite_size": req.sprite_size, "style": req.style}
     meta["generation_hash"] = gen_hash
     meta["validation"] = result.validation[0] if result.validation else {}
 
@@ -451,6 +453,7 @@ def generate(
         palette=Palette(req.palette),
         sprite_size=SpriteSize(req.sprite_size),
         theme=req.theme,
+        style=req.style,
         seed=req.seed,
     )
 
@@ -550,6 +553,7 @@ def _run_batch_item(pipe, item, output_dir, batch_id, user_id=None):
         palette=Palette(item.palette),
         sprite_size=SpriteSize(item.sprite_size),
         theme=item.theme,
+        style=item.style,
         seed=item.seed,
     )
 
@@ -614,7 +618,7 @@ def _run_batch_item(pipe, item, output_dir, batch_id, user_id=None):
         "batch_id": batch_id,
     })
 
-    meta = {"view": item.view, "animation": item.animation, "palette": item.palette, "sprite_size": item.sprite_size}
+    meta = {"view": item.view, "animation": item.animation, "palette": item.palette, "sprite_size": item.sprite_size, "style": item.style}
     meta["generation_hash"] = gen_hash
     meta["validation"] = result.validation[0] if result.validation else {}
 

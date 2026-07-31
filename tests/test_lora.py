@@ -117,6 +117,7 @@ class TestSpriteLoRAWrapper:
             assert p.requires_grad
 
     def test_overfit_constant_input(self):
+        torch.manual_seed(0)
         model = SpriteLoRAWrapper(rank=8, alpha=4.0)
         optimizer = torch.optim.Adam(model.lora_parameters(), lr=1e-2)
         x = torch.ones(2, 4, 32, 32)
