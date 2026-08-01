@@ -138,14 +138,18 @@ class AssetPipeline:
         if self.config.pack_sheet and len(processed) > 1:
             names = [f"{controls.asset_type.value}_{controls.animation.value}_{i}" for i in range(len(processed))]
             if self.config.pack_tileset or controls.asset_type == AssetType.TILESET:
-                paths, tileset_meta = self._export_tileset(processed, controls, output_dir)
+                paths, tileset_meta = self._export_tileset(
+                    processed, controls, output_dir, engine=self.config.export_engine
+                )
             elif controls.animation != Animation.NONE:
                 paths = export_animation(
                     processed, output_dir, names[0], engine=self.config.export_engine
                 )
             else:
-                from ..exporters.exporter import generic_png
-                paths = generic_png(processed, names, output_dir)
+                from ..exporters.exporter import export_sprite
+                paths = export_sprite(
+                    processed, output_dir, names[0], engine=self.config.export_engine
+                )
         else:
             from ..exporters.exporter import generic_png
             names = [f"{controls.asset_type.value}_{i}" for i in range(len(processed))]
@@ -200,14 +204,20 @@ class AssetPipeline:
         images: List[Image.Image],
         controls: AssetControls,
         output_dir: str,
+        engine: str = "godot",
     ) -> Tuple[List[str], dict]:
         """Pack multiple images into a tileset sheet + JSON metadata.
 
         Uses packer.tileset() so output carries per-tile grid metadata
         (col/row/position), matching the tileset packing in the ROADMAP
         structure (packing: sprite sheet, tileset, animation strip).
+
+        The requested export ``engine`` is honored too: engine-specific
+        descriptors (Unity .meta / GameMaker .yy / Phaser JSON / Godot .tres)
+        are written alongside the canonical tileset sheet + grid JSON.
         """
         from ..packing.packer import tileset
+        from ..exporters.exporter import _engine_export
         name = f"{controls.asset_type.value}_tileset"
         sheet, tile_meta = tileset(images, padding=1)
         tile_meta = dict(tile_meta)
@@ -217,4 +227,9 @@ class AssetPipeline:
         meta_path = os.path.join(output_dir, f"{name}.json")
         with open(meta_path, "w") as f:
             json.dump(tile_meta, f, indent=2)
-        return [sheet_path, meta_path], tile_meta
+        paths = [sheet_path, meta_path]
+        engine_meta = dict(tile_meta)
+        engine_meta["name"] = f"{name}_atlas"
+        engine_paths = _engine_export(sheet, engine_meta, output_dir, engine)
+        paths.extend(engine_paths)
+        return paths, tile_meta

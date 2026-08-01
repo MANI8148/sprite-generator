@@ -10,6 +10,7 @@ from backend.modules.exporters.exporter import (
     gamemaker,
     phaser,
     export_animation,
+    export_sprite,
     zip_package,
 )
 
@@ -333,6 +334,56 @@ class TestExportAnimation:
         paths = export_animation(images, str(tmp_path), "multi", engine="phaser")
         data = json.loads(Path(paths[1]).read_text())
         assert len(data["frames"]) == 4
+
+
+class TestExportSprite:
+    """export_sprite() honors the selected engine for static sprite sheets."""
+
+    def test_godot_engine(self, tmp_path):
+        paths = export_sprite(_make_sample_images(2), str(tmp_path), "hero", engine="godot")
+        assert Path(paths[0]).suffix == ".png"
+        assert Path(paths[1]).suffix == ".tres"
+
+    def test_unity_engine(self, tmp_path):
+        paths = export_sprite(_make_sample_images(2), str(tmp_path), "hero", engine="unity")
+        assert Path(paths[0]).suffix == ".png"
+        assert paths[1].endswith(".png.meta")
+
+    def test_gamemaker_engine(self, tmp_path):
+        paths = export_sprite(_make_sample_images(2), str(tmp_path), "hero", engine="gamemaker")
+        assert Path(paths[0]).suffix == ".png"
+        assert Path(paths[1]).suffix == ".yy"
+        data = json.loads(Path(paths[1]).read_text())
+        assert len(data["$GMSprite"]["frames"]) == 2
+
+    def test_phaser_engine(self, tmp_path):
+        paths = export_sprite(_make_sample_images(2), str(tmp_path), "hero", engine="phaser")
+        assert Path(paths[0]).suffix == ".png"
+        assert Path(paths[1]).suffix == ".json"
+        data = json.loads(Path(paths[1]).read_text())
+        assert len(data["frames"]) == 2
+
+    def test_default_engine_is_godot(self, tmp_path):
+        paths = export_sprite(_make_sample_images(2), str(tmp_path), "sprite")
+        assert Path(paths[1]).suffix == ".tres"
+
+    def test_unknown_engine_falls_back_to_generic(self, tmp_path):
+        paths = export_sprite(_make_sample_images(2), str(tmp_path), "sprite", engine="unknown")
+        suffixes = {Path(p).suffix for p in paths}
+        assert ".png" in suffixes
+        assert ".json" in suffixes
+        assert not any(p.endswith(".yy") or p.endswith(".tres") or p.endswith(".meta")
+                       for p in paths)
+
+    def test_single_image_no_engine_metadata(self, tmp_path):
+        paths = export_sprite(_make_sample_images(1), str(tmp_path), "solo", engine="gamemaker")
+        assert all(Path(p).suffix == ".png" for p in paths)
+        assert not any(p.endswith(".yy") for p in paths)
+
+    def test_export_creates_output_dir(self, tmp_path):
+        nested = tmp_path / "a" / "b"
+        paths = export_sprite(_make_sample_images(2), str(nested), "sprite", engine="phaser")
+        assert Path(paths[0]).exists()
 
 
 class TestZipPackage:

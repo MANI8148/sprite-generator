@@ -244,8 +244,9 @@ Only start this once Phase 1 is live and you've used it enough to trust the pipe
 
 - [x] Add remaining generator modules one at a time, each validated for quality before
       moving to the next: Tileset, Environment, UI, Animation, Props/Icons, Portraits
-- [ ] Add the remaining exporters: Unity, GameMaker, Phaser — prioritize based on which
-      engine your actual users request most, not the roadmap's listed order
+- [x] Add the remaining exporters: Unity, GameMaker, Phaser — wired through the
+      pipeline so the selected engine is honored for animation strips, static
+      sprite sheets, and tilesets
 - [ ] Move storage from local/dev to Cloudflare R2 once asset volume justifies it
 
 ### PHASE 5 — Platform hardening (production readiness, same shape as your Eridian work)

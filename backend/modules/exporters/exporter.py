@@ -155,6 +155,61 @@ def phaser(atlas: Image.Image, metadata: dict, output_dir: str) -> List[str]:
     return [atlas_path, json_path]
 
 
+def _engine_export(
+    sheet: Image.Image,
+    meta: dict,
+    output_dir: str,
+    engine: str,
+) -> List[str]:
+    """Dispatch a packed sheet + frame metadata to an engine-specific exporter.
+
+    Returns the engine artifact paths, or ``[]`` for unrecognized engines so
+    callers can fall back to a generic PNG + JSON export.
+    """
+    export_meta = dict(meta)
+    export_meta["frames"] = [
+        {"index": i, "x": f["x"], "y": f["y"], "w": f["w"], "h": f["h"]}
+        for i, f in enumerate(meta.get("frames", []))
+    ]
+    if engine == "godot":
+        return godot(sheet, export_meta, output_dir)
+    elif engine == "unity":
+        return unity(sheet, export_meta, output_dir)
+    elif engine == "gamemaker":
+        return gamemaker(sheet, export_meta, output_dir)
+    elif engine == "phaser":
+        return phaser(sheet, export_meta, output_dir)
+    return []
+
+
+def export_sprite(
+    images: List[Image.Image],
+    output_dir: str,
+    name: str,
+    engine: str = "godot",
+    atlas: bool = True,
+) -> List[str]:
+    """Pack a list of images into a sprite sheet and export in the requested engine format.
+
+    Unlike ``export_animation`` (which always builds a horizontal strip), this
+    packs the images as a grid sprite sheet and honors the selected ``engine``
+    (godot / unity / gamemaker / phaser), falling back to a generic PNG + JSON
+    export for unknown engines. This makes engine selection work for static
+    multi-frame assets too, not just animation strips.
+    """
+    if not atlas or len(images) == 1:
+        names = [f"{name}_{i}" for i in range(len(images))]
+        return individual_pngs(images, names, output_dir)
+    norm = [normalize(img, target_size=(512, 512)) for img in images]
+    sheet, meta = sprite_sheet(norm, padding=2)
+    meta["name"] = name
+    engine_paths = _engine_export(sheet, meta, output_dir, engine)
+    if engine_paths:
+        return engine_paths
+    names = [f"{name}_{i}" for i in range(len(images))]
+    return generic_png(norm, names, output_dir, atlas=True)
+
+
 def _build_frames(meta: dict) -> list:
     fw = meta["frame_size"]["w"]
     fh = meta["frame_size"]["h"]
@@ -172,22 +227,16 @@ def export_animation(images: List[Image.Image], output_dir: str, name: str, engi
     strip, meta = animation_strip(norm, direction="horizontal", padding=2)
     meta["name"] = name
     meta["frames"] = _build_frames(meta)
-    if engine == "godot":
-        return godot(strip, meta, output_dir)
-    elif engine == "unity":
-        return unity(strip, meta, output_dir)
-    elif engine == "gamemaker":
-        return gamemaker(strip, meta, output_dir)
-    elif engine == "phaser":
-        return phaser(strip, meta, output_dir)
-    else:
-        os.makedirs(output_dir, exist_ok=True)
-        strip_path = os.path.join(output_dir, f"{name}_strip.png")
-        strip.save(strip_path)
-        meta_path = os.path.join(output_dir, f"{name}_strip.json")
-        with open(meta_path, "w") as f:
-            f.write(_format_metadata(meta))
-        return [strip_path, meta_path]
+    engine_paths = _engine_export(strip, meta, output_dir, engine)
+    if engine_paths:
+        return engine_paths
+    os.makedirs(output_dir, exist_ok=True)
+    strip_path = os.path.join(output_dir, f"{name}_strip.png")
+    strip.save(strip_path)
+    meta_path = os.path.join(output_dir, f"{name}_strip.json")
+    with open(meta_path, "w") as f:
+        f.write(_format_metadata(meta))
+    return [strip_path, meta_path]
 
 
 def zip_package(file_paths: List[str], output_path: str) -> str:

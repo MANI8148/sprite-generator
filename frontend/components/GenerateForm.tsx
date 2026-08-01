@@ -113,6 +113,17 @@ export default function GenerateForm() {
         </label>
 
         <label>
+          Export Engine:
+          <select name="engine" value={form.engine} onChange={handleChange}>
+            <option value="godot">Godot</option>
+            <option value="unity">Unity</option>
+            <option value="gamemaker">GameMaker</option>
+            <option value="phaser">Phaser</option>
+            <option value="generic">Generic PNG + JSON</option>
+          </select>
+        </label>
+
+        <label>
           Theme:
           <input
             type="text"
