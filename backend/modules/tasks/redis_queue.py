@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional
@@ -86,3 +87,33 @@ class RedisTaskQueue(TaskQueue):
     @property
     def running_count(self) -> int:
         return sum(1 for j in self.list_jobs() if j["status"] == JobStatus.RUNNING.value)
+
+
+def create_redis_task_queue(
+    redis_url: Optional[str] = None,
+    max_workers: int = 2,
+    key_prefix: str = "task_queue:",
+) -> "RedisTaskQueue":
+    """Create a Redis-backed task queue.
+
+    Uses ``REDIS_URL`` from the environment when ``redis_url`` is not given.
+    Raises a clear error when the ``redis`` package is unavailable.
+    """
+    if not redis_url:
+        redis_url = os.environ.get("REDIS_URL")
+    if not redis_url:
+        raise ValueError("REDIS_URL is required to create a RedisTaskQueue")
+
+    try:
+        import redis as _redis
+    except ImportError:  # pragma: no cover - optional dependency
+        raise RuntimeError(
+            "Redis task queue requires the 'redis' package. "
+            "Install it with: pip install redis"
+        ) from None
+
+    return RedisTaskQueue(
+        redis_client=_redis.Redis.from_url(redis_url),
+        max_workers=max_workers,
+        key_prefix=key_prefix,
+    )

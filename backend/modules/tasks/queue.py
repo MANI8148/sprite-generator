@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+import os
 import uuid
 from enum import Enum
 from typing import Any, Callable, Optional
@@ -66,3 +67,21 @@ def get_task_queue() -> TaskQueue:
 def set_task_queue(queue: TaskQueue) -> None:
     global _default_queue
     _default_queue = queue
+
+
+def create_task_queue(max_workers: int = 2) -> TaskQueue:
+    """Create the appropriate task queue for the runtime.
+
+    Uses ``RedisTaskQueue`` when ``REDIS_URL`` is set (concurrent / multi-worker
+    deployments), otherwise falls back to the in-memory ``TaskQueue`` so single
+    process setups need no external services.
+    """
+    redis_url = os.environ.get("REDIS_URL")
+    if redis_url:
+        from .redis_queue import create_redis_task_queue
+
+        return create_redis_task_queue(
+            redis_url=redis_url,
+            max_workers=max_workers,
+        )
+    return TaskQueue(max_workers=max_workers)

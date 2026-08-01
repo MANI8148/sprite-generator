@@ -220,7 +220,7 @@ Only start this once Phase 1 is live and you've used it enough to trust the pipe
 - [ ] Pick the SECOND generator module based on what users actually ask for in Phase 1
       feedback — don't default to "Building Generator" just because it's next on the
       original roadmap list if user demand points elsewhere
-- [ ] Introduce Redis + a task queue (Celery, or a lighter alternative like `arq`) —
+- [x] Introduce Redis + a task queue (Celery, or a lighter alternative like `arq`) —
       only now does concurrent multi-module generation justify this complexity
 - [ ] Migrate SQLite → PostgreSQL once you have actual concurrent users, not before
 - [ ] Add a real jobs table / status polling so the frontend can show generation progress

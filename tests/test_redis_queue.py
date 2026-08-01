@@ -162,3 +162,128 @@ class TestRedisQueueWithOrchestrator:
         assert result.status == WorkflowStatus.COMPLETED
         assert result.step_results["a"] == "result_a"
         assert result.step_results["b"] == "result_b"
+
+
+class TestRedisTaskQueueFactory:
+    def test_create_redis_task_queue_requires_redis_url(self, monkeypatch):
+        from backend.modules.tasks.redis_queue import create_redis_task_queue
+
+        monkeypatch.delenv("REDIS_URL", raising=False)
+        with pytest.raises(ValueError):
+            create_redis_task_queue(redis_url=None)
+
+    def test_create_redis_task_queue_uses_env_url(self, monkeypatch):
+        from backend.modules.tasks.redis_queue import create_redis_task_queue
+
+        monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+        q = create_redis_task_queue()
+        assert isinstance(q, RedisTaskQueue)
+        assert q._key_prefix == "task_queue:"
+
+    def test_create_redis_task_queue_explicit_url_wins(self, monkeypatch):
+        from backend.modules.tasks.redis_queue import create_redis_task_queue
+
+        monkeypatch.setenv("REDIS_URL", "redis://wrong:9999/0")
+        q = create_redis_task_queue(redis_url="redis://right:6379/0")
+        assert isinstance(q, RedisTaskQueue)
+
+
+class TestTaskQueueSelector:
+    def test_selector_returns_in_memory_without_redis(self, monkeypatch):
+        from backend.modules.tasks.queue import create_task_queue, TaskQueue
+
+        monkeypatch.delenv("REDIS_URL", raising=False)
+        q = create_task_queue()
+        assert isinstance(q, TaskQueue)
+        assert not isinstance(q, RedisTaskQueue)
+
+    def test_selector_returns_redis_with_redis_url(self, monkeypatch):
+        from backend.modules.tasks.queue import create_task_queue
+
+        monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+        q = create_task_queue()
+        assert isinstance(q, RedisTaskQueue)
+
+    def test_main_import_wires_selector_queue(self, monkeypatch):
+        import importlib
+
+        monkeypatch.delenv("REDIS_URL", raising=False)
+        import backend.main as main
+        importlib.reload(main)
+        from backend.modules.tasks.queue import get_task_queue, TaskQueue
+
+        assert isinstance(get_task_queue(), TaskQueue)
+        assert not isinstance(get_task_queue(), RedisTaskQueue)
+
+    def test_main_import_wires_redis_queue_when_configured(self, monkeypatch):
+        import importlib
+
+        monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+        import backend.main as main
+        importlib.reload(main)
+        from backend.modules.tasks.queue import get_task_queue
+
+        assert isinstance(get_task_queue(), RedisTaskQueue)
+
+
+class TestGenerateAPIWithRedisQueue:
+    @pytest.fixture(autouse=True)
+    def setup_app(self, redis_queue):
+        import tempfile
+        from backend.modules.tasks.queue import set_task_queue
+        from backend.modules.pipeline.orchestrator import AssetPipeline
+        from backend.modules.storage.file_storage import FileStorage
+        from backend.modules.storage.asset_library import AssetLibrary
+        from backend.modules.rate_limiter import RateLimiter, set_rate_limiter
+        from backend.api.routes import (
+            set_pipeline, set_generator_loaded, set_storage, set_library, _batch_jobs,
+        )
+        from backend.main import app
+        from fastapi.testclient import TestClient
+        from tests.test_api import FakeGenerator, poll_job
+
+        set_generator_loaded(False)
+        tmp = tempfile.mkdtemp()
+        set_storage(FileStorage(base_dir=tmp))
+        set_library(AssetLibrary(base_dir=tmp + "/lib"))
+        set_rate_limiter(RateLimiter(max_requests=1000, window_seconds=60))
+        set_task_queue(redis_queue)
+        _batch_jobs.clear()
+
+        pipe = AssetPipeline()
+        pipe.set_generator(FakeGenerator(num_images=1))
+        set_pipeline(pipe)
+        set_generator_loaded(True)
+
+        self.client = TestClient(app)
+        self.poll = poll_job
+        yield
+        _batch_jobs.clear()
+
+    def test_generate_and_status_through_redis_queue(self):
+        resp = self.client.post("/generate", json={
+            "asset_type": "character",
+            "view": "front",
+            "animation": "idle",
+            "palette": "auto",
+            "sprite_size": "32x32",
+            "num_frames": 1,
+        })
+        assert resp.status_code == 202
+        job_id = resp.json()["job_id"]
+
+        result = self.poll(self.client, job_id)
+        assert result["status"] == "done"
+        assert result["prompt"] != ""
+        assert "quality_tier" in result
+        assert isinstance(result["output_paths"], list)
+        assert len(result["output_paths"]) > 0
+
+    def test_status_reflects_redis_queue(self):
+        resp = self.client.post("/generate", json={"asset_type": "enemy"})
+        assert resp.status_code == 202
+        job_id = resp.json()["job_id"]
+
+        status = self.poll(self.client, job_id)
+        assert status["status"] in ("done", "failed")
+        assert "error" not in status or status["error"] is None
