@@ -11,6 +11,13 @@ import {
   getBillingTransactions,
   topupCredits,
   getCostEstimate,
+  getLibrary,
+  getLibraryAsset,
+  getLibraryTags,
+  deleteLibraryAsset,
+  updateLibraryAsset,
+  addAssetTags,
+  removeAssetTags,
   getAuthToken,
   setAuthToken,
   clearAuthToken,
@@ -286,5 +293,157 @@ describe("getCostEstimate", () => {
 
     const result = await getCostEstimate(4);
     expect(result.total_cost).toBe(4);
+  });
+});
+
+describe("getLibrary", () => {
+  const mockAsset = {
+    asset_id: "abc123",
+    job_id: "abc123",
+    asset_type: "character",
+    prompt: "a pixel art hero sprite",
+    quality_tier: "clean",
+    tags: ["hero"],
+    category: "",
+    thumbnail_path: null,
+    zip_path: null,
+    output_paths: ["/tmp/abc123.png"],
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("returns library list", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ assets: [mockAsset], total: 1 }),
+    });
+
+    const result = await getLibrary();
+    expect(result.total).toBe(1);
+    expect(result.assets[0].asset_id).toBe("abc123");
+  });
+
+  it("sends filter query params", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ assets: [], total: 0 }),
+    });
+
+    await getLibrary({ asset_type: "character", search: "hero", limit: 20 });
+
+    const [url, init] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(url).toContain("/library?");
+    expect(url).toContain("asset_type=character");
+    expect(url).toContain("search=hero");
+    expect(url).toContain("limit=20");
+    expect(init.method).toBeUndefined();
+  });
+
+  it("throws on failure", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => "boom",
+    });
+
+    await expect(getLibrary()).rejects.toThrow("Library fetch failed: 500 boom");
+  });
+});
+
+describe("getLibraryAsset", () => {
+  it("returns a single asset", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ asset_id: "abc123", job_id: "abc123", asset_type: "character" }),
+    });
+
+    const result = await getLibraryAsset("abc123");
+    expect(result.asset_id).toBe("abc123");
+    const [url] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(url).toContain("/library/abc123");
+  });
+});
+
+describe("getLibraryTags", () => {
+  it("returns tags", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ tags: ["hero", "green"] }),
+    });
+
+    const result = await getLibraryTags();
+    expect(result.tags).toEqual(["hero", "green"]);
+  });
+});
+
+describe("deleteLibraryAsset", () => {
+  it("sends DELETE and returns confirmation", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: "deleted", asset_id: "abc123" }),
+    });
+
+    const result = await deleteLibraryAsset("abc123");
+    expect(result.status).toBe("deleted");
+    const [url, init] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(url).toContain("/library/abc123");
+    expect(init.method).toBe("DELETE");
+  });
+
+  it("throws on failure", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 404,
+    });
+
+    await expect(deleteLibraryAsset("missing")).rejects.toThrow("Library delete failed: 404");
+  });
+});
+
+describe("updateLibraryAsset", () => {
+  it("sends PATCH with updates", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ asset_id: "abc123", category: "rpg", tags: ["hero"] }),
+    });
+
+    const result = await updateLibraryAsset("abc123", { category: "rpg", tags: ["hero"] });
+    expect(result.category).toBe("rpg");
+    const [url, init] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(url).toContain("/library/abc123");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body)).toEqual({ category: "rpg", tags: ["hero"] });
+  });
+});
+
+describe("addAssetTags", () => {
+  it("sends POST with tags", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ asset_id: "abc123", tags: ["hero", "newtag"] }),
+    });
+
+    const result = await addAssetTags("abc123", ["newtag"]);
+    expect(result.tags).toEqual(["hero", "newtag"]);
+    const [url, init] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(url).toContain("/library/abc123/tags");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ tags: ["newtag"] });
+  });
+});
+
+describe("removeAssetTags", () => {
+  it("sends DELETE with tags", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ asset_id: "abc123", tags: [] }),
+    });
+
+    const result = await removeAssetTags("abc123", ["hero"]);
+    expect(result.tags).toEqual([]);
+    const [url, init] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(url).toContain("/library/abc123/tags");
+    expect(init.method).toBe("DELETE");
+    expect(JSON.parse(init.body)).toEqual({ tags: ["hero"] });
   });
 });

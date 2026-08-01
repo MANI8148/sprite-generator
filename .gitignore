@@ -25,4 +25,5 @@ runs/
 
 node_modules/
 .next/
+*.tsbuildinfo
 data/billing/

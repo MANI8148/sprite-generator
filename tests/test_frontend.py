@@ -28,13 +28,13 @@ class TestFrontendStructure:
     def test_pages_exist(self):
         pages = FRONTEND / "pages"
         assert pages.exists()
-        expected = ["_app.tsx", "index.tsx", "history.tsx", "downloads.tsx", "settings.tsx"]
+        expected = ["_app.tsx", "index.tsx", "history.tsx", "library.tsx", "downloads.tsx", "settings.tsx"]
         for p in expected:
             assert (pages / p).exists(), f"Missing page: {p}"
 
     def test_components_exist(self):
         comp = FRONTEND / "components"
-        expected = ["Layout.tsx", "Navbar.tsx", "GenerateForm.tsx", "HistoryList.tsx", "DownloadList.tsx"]
+        expected = ["Layout.tsx", "Navbar.tsx", "GenerateForm.tsx", "HistoryList.tsx", "LibraryList.tsx", "DownloadList.tsx"]
         for c in expected:
             assert (comp / c).exists(), f"Missing component: {c}"
 
@@ -70,6 +70,44 @@ class TestFrontendPages:
         content = (FRONTEND / "pages" / "_app.tsx").read_text()
         assert "Layout" in content
         assert "styles/globals.css" in content
+
+
+class TestFrontendAssetLibrary:
+    """Asset Library page (roadmap Phase 2 Item 5)."""
+
+    def test_library_page_exists(self):
+        page = FRONTEND / "pages" / "library.tsx"
+        content = page.read_text()
+        assert "LibraryList" in content
+        assert "export default" in content
+
+    def test_library_component_exists(self):
+        comp = FRONTEND / "components" / "LibraryList.tsx"
+        content = comp.read_text()
+        assert "export default function LibraryList" in content
+
+    def test_navbar_has_library_link(self):
+        content = (FRONTEND / "components" / "Navbar.tsx").read_text()
+        assert '"/library"' in content
+        assert "Library" in content
+
+    def test_api_has_library_functions(self):
+        content = (FRONTEND / "lib" / "api.ts").read_text()
+        for fn in [
+            "getLibrary",
+            "getLibraryAsset",
+            "getLibraryTags",
+            "deleteLibraryAsset",
+            "updateLibraryAsset",
+            "addAssetTags",
+            "removeAssetTags",
+        ]:
+            assert fn in content, f"API missing function: {fn}"
+
+    def test_api_has_library_interface(self):
+        content = (FRONTEND / "lib" / "api.ts").read_text()
+        assert "LibraryAsset" in content
+        assert "LibraryListResponse" in content
 
 
 class TestFrontendComponents:

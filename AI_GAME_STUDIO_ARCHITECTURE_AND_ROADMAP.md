@@ -225,7 +225,7 @@ Only start this once Phase 1 is live and you've used it enough to trust the pipe
 - [ ] Migrate SQLite → PostgreSQL once you have actual concurrent users, not before
 - [ ] Add a real jobs table / status polling so the frontend can show generation progress
       for longer-running or queued requests
-- [ ] Add a basic Asset Library page (list of a user's past generations, re-downloadable)
+- [x] Add a basic Asset Library page (list of a user's past generations, re-downloadable)
 
 ### PHASE 3 — Style consistency + orchestration
 

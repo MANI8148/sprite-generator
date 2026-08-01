@@ -72,6 +72,26 @@ export interface UserInfo {
   user_id: string;
 }
 
+export interface LibraryAsset {
+  asset_id: string;
+  job_id: string;
+  asset_type: string;
+  prompt: string;
+  quality_tier: string;
+  tags: string[];
+  category: string;
+  thumbnail_path: string | null;
+  zip_path: string | null;
+  output_paths: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LibraryListResponse {
+  assets: LibraryAsset[];
+  total: number;
+}
+
 const TOKEN_KEY = "sprite_gen_token";
 
 export function getAuthToken(): string | null {
@@ -203,5 +223,86 @@ export async function getCostEstimate(
   const params = numFrames ? `?num_frames=${numFrames}` : "";
   const res = await fetch(`${API_BASE}/billing/cost-estimate${params}`);
   if (!res.ok) throw new Error(`Cost estimate failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getLibrary(
+  filters?: {
+    asset_type?: string;
+    quality_tier?: string;
+    category?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }
+): Promise<LibraryListResponse> {
+  const params = new URLSearchParams();
+  if (filters?.asset_type) params.set("asset_type", filters.asset_type);
+  if (filters?.quality_tier) params.set("quality_tier", filters.quality_tier);
+  if (filters?.category) params.set("category", filters.category);
+  if (filters?.search) params.set("search", filters.search);
+  if (filters?.limit) params.set("limit", String(filters.limit));
+  if (filters?.offset) params.set("offset", String(filters.offset));
+  const qs = params.toString();
+  const res = await fetch(`${API_BASE}/library${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`Library fetch failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+export async function getLibraryAsset(assetId: string): Promise<LibraryAsset> {
+  const res = await fetch(`${API_BASE}/library/${assetId}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`Library asset fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function getLibraryTags(): Promise<{ tags: string[] }> {
+  const res = await fetch(`${API_BASE}/library/tags`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`Library tags fetch failed: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteLibraryAsset(assetId: string): Promise<{ status: string; asset_id: string }> {
+  const res = await fetch(`${API_BASE}/library/${assetId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`Library delete failed: ${res.status}`);
+  return res.json();
+}
+
+export async function updateLibraryAsset(
+  assetId: string,
+  updates: { category?: string; tags?: string[] }
+): Promise<LibraryAsset> {
+  const res = await fetch(`${API_BASE}/library/${assetId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) throw new Error(`Library update failed: ${res.status}`);
+  return res.json();
+}
+
+export async function addAssetTags(assetId: string, tags: string[]): Promise<LibraryAsset> {
+  const res = await fetch(`${API_BASE}/library/${assetId}/tags`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ tags }),
+  });
+  if (!res.ok) throw new Error(`Add tags failed: ${res.status}`);
+  return res.json();
+}
+
+export async function removeAssetTags(assetId: string, tags: string[]): Promise<LibraryAsset> {
+  const res = await fetch(`${API_BASE}/library/${assetId}/tags`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ tags }),
+  });
+  if (!res.ok) throw new Error(`Remove tags failed: ${res.status}`);
   return res.json();
 }

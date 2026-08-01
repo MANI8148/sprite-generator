@@ -20,6 +20,7 @@ describe("Navbar", () => {
     render(<Navbar />);
     expect(screen.getByText("Generate")).toBeTruthy();
     expect(screen.getByText("History")).toBeTruthy();
+    expect(screen.getByText("Library")).toBeTruthy();
     expect(screen.getByText("Downloads")).toBeTruthy();
     expect(screen.getByText("Billing")).toBeTruthy();
     expect(screen.getByText("Settings")).toBeTruthy();
