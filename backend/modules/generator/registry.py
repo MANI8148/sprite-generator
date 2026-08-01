@@ -5,6 +5,8 @@ from .tileset_generator import TilesetGenerator
 from .environment_generator import EnvironmentGenerator
 from .prop_generator import PropGenerator
 from .ui_generator import UIGenerator
+from .animation_generator import AnimationGenerator
+from .portrait_generator import PortraitGenerator
 from .ip_adapter_generator import IPAdapterGenerator
 
 
@@ -14,6 +16,8 @@ _generator_classes: Dict[str, Type[BaseGenerator]] = {
     "environment": EnvironmentGenerator,
     "prop": PropGenerator,
     "ui": UIGenerator,
+    "animation": AnimationGenerator,
+    "portrait": PortraitGenerator,
     "ip_adapter": IPAdapterGenerator,
 }
 

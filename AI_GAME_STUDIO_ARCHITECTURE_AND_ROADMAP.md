@@ -242,7 +242,7 @@ Only start this once Phase 1 is live and you've used it enough to trust the pipe
 
 ### PHASE 4 — Scale out generator coverage
 
-- [ ] Add remaining generator modules one at a time, each validated for quality before
+- [x] Add remaining generator modules one at a time, each validated for quality before
       moving to the next: Tileset, Environment, UI, Animation, Props/Icons, Portraits
 - [ ] Add the remaining exporters: Unity, GameMaker, Phaser — prioritize based on which
       engine your actual users request most, not the roadmap's listed order

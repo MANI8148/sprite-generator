@@ -8,6 +8,8 @@ from backend.modules.generator.tileset_generator import TilesetGenerator
 from backend.modules.generator.environment_generator import EnvironmentGenerator
 from backend.modules.generator.prop_generator import PropGenerator
 from backend.modules.generator.ui_generator import UIGenerator
+from backend.modules.generator.animation_generator import AnimationGenerator
+from backend.modules.generator.portrait_generator import PortraitGenerator
 from backend.modules.generator.registry import (
     register_generator,
     get_generator_class,
@@ -160,6 +162,64 @@ class TestUIGenerator:
         assert not self.fake._loaded
 
 
+class TestAnimationGenerator:
+    def setup_method(self):
+        self.fake = FakeGenerator()
+        self.gen = AnimationGenerator(self.fake)
+
+    def test_is_base_generator(self):
+        assert isinstance(self.gen, BaseGenerator)
+
+    def test_generate_returns_images(self):
+        images = self.gen.generate(prompt="knight walk", num_images=4)
+        assert len(images) == 4
+        assert all(img.mode == "RGBA" for img in images)
+
+    def test_generate_forwards_arguments(self):
+        images = self.gen.generate(prompt="idle", num_images=1)
+        assert len(images) == 1
+
+    def test_get_defaults(self):
+        defaults = self.gen.get_defaults()
+        assert defaults["width"] == 256
+        assert defaults["height"] == 256
+
+    def test_load_and_unload(self):
+        self.gen.load()
+        assert self.fake._loaded
+        self.gen.unload()
+        assert not self.fake._loaded
+
+
+class TestPortraitGenerator:
+    def setup_method(self):
+        self.fake = FakeGenerator()
+        self.gen = PortraitGenerator(self.fake)
+
+    def test_is_base_generator(self):
+        assert isinstance(self.gen, BaseGenerator)
+
+    def test_generate_returns_images(self):
+        images = self.gen.generate(prompt="wizard", num_images=2)
+        assert len(images) == 2
+        assert all(img.mode == "RGBA" for img in images)
+
+    def test_generate_forwards_arguments(self):
+        images = self.gen.generate(prompt="hero", num_images=1)
+        assert len(images) == 1
+
+    def test_get_defaults(self):
+        defaults = self.gen.get_defaults()
+        assert defaults["width"] == 256
+        assert defaults["height"] == 256
+
+    def test_load_and_unload(self):
+        self.gen.load()
+        assert self.fake._loaded
+        self.gen.unload()
+        assert not self.fake._loaded
+
+
 class TestGeneratorRegistry:
     def test_list_generators(self):
         gens = list_generators()
@@ -168,6 +228,8 @@ class TestGeneratorRegistry:
         assert "environment" in gens
         assert "prop" in gens
         assert "ui" in gens
+        assert "animation" in gens
+        assert "portrait" in gens
 
     def test_get_generator_class(self):
         cls = get_generator_class("sd")
