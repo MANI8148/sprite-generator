@@ -28,3 +28,6 @@ class BaseGenerator(ABC):
 
     def get_defaults(self) -> dict:
         return {}
+
+    def supports_ip_adapter(self) -> bool:
+        return False

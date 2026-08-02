@@ -265,3 +265,93 @@ class TestPipelineIPAdapter:
         controls = AssetControls(asset_type=AssetType.CHARACTER, view=View.FRONT)
         result = pipeline.run(controls, output_dir=str(tmp_path))
         assert "ip_adapter_image" not in gen.last_kwargs
+
+
+class TestPipelineIPAdapterRouting:
+    """IP-Adapter must work even when the configured generator does not accept
+    ip_adapter_image (e.g. the default SDGenerator)."""
+
+    class PlainSDGenerator:
+        def __init__(self):
+            self.lora_path = None
+
+        def supports_ip_adapter(self):
+            return False
+
+        def generate(self, prompt="", negative_prompt="", width=512, height=512,
+                     num_inference_steps=28, guidance_scale=7.0, seed=-1, num_images=1):
+            arr = np.zeros((64, 64, 4), dtype=np.uint8)
+            arr[8:56, 8:56, :3] = [10, 20, 30]
+            arr[8:56, 8:56, 3] = 255
+            return [Image.fromarray(arr)]
+
+    def test_sd_generator_reports_no_ip_adapter_support(self):
+        gen = IPAdapterGenerator()
+        assert gen.supports_ip_adapter() is True
+        assert self.PlainSDGenerator().supports_ip_adapter() is False
+
+    def test_resolve_keeps_ip_adapter_generator(self):
+        gen = IPAdapterGenerator()
+        config = PipelineConfig(ip_adapter=True, reference_image="ref.png")
+        pipeline = AssetPipeline(config=config)
+        pipeline.set_generator(gen)
+        assert pipeline._resolve_generator() is gen
+
+    def test_resolve_keeps_duck_typed_generator_accepting_kwargs(self):
+        class DuckGen:
+            def generate(self, **kwargs):
+                return []
+
+        gen = DuckGen()
+        config = PipelineConfig(ip_adapter=True, reference_image="ref.png")
+        pipeline = AssetPipeline(config=config)
+        pipeline.set_generator(gen)
+        assert pipeline._resolve_generator() is gen
+
+    def test_resolve_routes_plain_generator_to_ip_adapter(self):
+        from unittest.mock import patch
+
+        config = PipelineConfig(ip_adapter=True, ip_adapter_scale=0.7, reference_image="ref.png")
+        pipeline = AssetPipeline(config=config)
+        pipeline.set_generator(self.PlainSDGenerator())
+        with patch("backend.modules.generator.registry.create_generator") as mock_create:
+            mock_create.return_value = FakeIPAdapterGen(num_images=1)
+            resolved = pipeline._resolve_generator()
+            assert isinstance(resolved, FakeIPAdapterGen)
+            mock_create.assert_called_once_with(
+                "ip_adapter", ip_adapter_scale=0.7, lora_path=None
+            )
+
+    def test_resolve_keeps_generator_when_ip_adapter_disabled(self):
+        config = PipelineConfig(ip_adapter=False)
+        pipeline = AssetPipeline(config=config)
+        pipeline.set_generator(self.PlainSDGenerator())
+        assert pipeline._resolve_generator() is pipeline.generator
+
+    def test_pipeline_generate_with_plain_sd_generator_and_ip_adapter(self, tmp_path):
+        """Regression test: enabling ip_adapter with a generator that cannot
+        accept ip_adapter_image must not crash the pipeline."""
+        from unittest.mock import patch
+
+        ref_path = str(tmp_path / "ref.png")
+        _make_ref_image().save(ref_path)
+
+        config = PipelineConfig(
+            ip_adapter=True,
+            ip_adapter_scale=0.8,
+            reference_image=ref_path,
+            upscale=1,
+            pack_sheet=False,
+            export_zip=False,
+        )
+        pipeline = AssetPipeline(config=config)
+        pipeline.set_generator(self.PlainSDGenerator())
+        controls = AssetControls(asset_type=AssetType.CHARACTER, view=View.FRONT)
+        with patch("backend.modules.generator.registry.create_generator") as mock_create:
+            mock_create.return_value = FakeIPAdapterGen(num_images=1)
+            result = pipeline.run(controls, output_dir=str(tmp_path))
+        assert len(result.images) == 1
+        assert result.metadata["controls"]["ip_adapter"] is True
+        mock_create.assert_called_once_with(
+            "ip_adapter", ip_adapter_scale=0.8, lora_path=None
+        )

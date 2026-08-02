@@ -82,3 +82,6 @@ class IPAdapterGenerator(BaseGenerator):
             self.pipe.to("cpu")
             torch.cuda.empty_cache()
             self.pipe = None
+
+    def supports_ip_adapter(self) -> bool:
+        return True

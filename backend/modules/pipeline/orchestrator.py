@@ -67,6 +67,42 @@ class AssetPipeline:
     def set_generator(self, generator: SDGenerator):
         self.generator = generator
 
+    def _resolve_generator(self):
+        """Return the generator to use for this run.
+
+        When IP-Adapter is requested with a reference image, prefer a generator
+        that supports it. If the configured generator cannot accept
+        ``ip_adapter_image``, fall back to an :class:`IPAdapterGenerator` so the
+        style-consistency path actually works instead of crashing.
+        """
+        if not (self.config.ip_adapter and self.config.reference_image):
+            return self.generator
+        if self._generator_accepts_ip_adapter(self.generator):
+            return self.generator
+        from ..generator.registry import create_generator
+        fallback = create_generator(
+            "ip_adapter",
+            ip_adapter_scale=self.config.ip_adapter_scale,
+            lora_path=getattr(self.generator, "lora_path", None),
+        )
+        if fallback is not None:
+            return fallback
+        return self.generator
+
+    @staticmethod
+    def _generator_accepts_ip_adapter(gen) -> bool:
+        if hasattr(gen, "supports_ip_adapter"):
+            return bool(gen.supports_ip_adapter())
+        import inspect
+        try:
+            sig = inspect.signature(gen.generate)
+        except (TypeError, ValueError):
+            return False
+        return "ip_adapter_image" in sig.parameters or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD
+            for p in sig.parameters.values()
+        )
+
     def run(
         self,
         controls: AssetControls,
@@ -100,7 +136,8 @@ class AssetPipeline:
                 gen_kwargs["ip_adapter_image"] = ref_img
             except Exception:
                 pass
-        images = self.generator.generate(**gen_kwargs)
+        gen = self._resolve_generator()
+        images = gen.generate(**gen_kwargs)
 
         # 3. Post-process each image
         processed = []
