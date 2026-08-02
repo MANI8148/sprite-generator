@@ -12,6 +12,7 @@ from backend.modules.pipeline.orchestrator import AssetPipeline
 from backend.modules.storage.file_storage import FileStorage
 from backend.modules.storage.r2_storage import R2Storage
 from backend.modules.storage.asset_library import AssetLibrary, AssetRecord
+from backend.modules.storage.database import DatabaseLibrary
 from backend.modules.tasks.queue import TaskQueue, get_task_queue, JobStatus
 from backend.modules.style_engine import StyleEngine, STYLE_PRESETS
 from backend.modules.asset_memory import compute_generation_hash
@@ -27,6 +28,7 @@ _storage = FileStorage()
 _library = AssetLibrary()
 _batch_jobs: dict[str, list[str]] = {}
 _r2_storage: R2Storage = R2Storage()
+_job_store: Optional[DatabaseLibrary] = None
 
 
 def get_pipeline() -> AssetPipeline:
@@ -77,6 +79,47 @@ def get_r2_storage() -> R2Storage:
 def set_r2_storage(st: R2Storage) -> None:
     global _r2_storage
     _r2_storage = st
+
+
+def get_job_store() -> Optional[DatabaseLibrary]:
+    return _job_store
+
+
+def set_job_store(store: Optional[DatabaseLibrary]) -> None:
+    global _job_store
+    _job_store = store
+
+
+def _persist_job(job_id: str, status_value: str, **fields) -> None:
+    store = get_job_store()
+    if store is None:
+        return
+    try:
+        if store.get_job(job_id) is None:
+            store.add_job(job_id, status=status_value, **fields)
+        else:
+            store.update_job(job_id, status=status_value, **fields)
+    except Exception:
+        pass
+
+
+def _stored_job_as_queue_entry(job_id: str) -> Optional[dict]:
+    store = get_job_store()
+    if store is None:
+        return None
+    record = store.get_job(job_id)
+    if record is None:
+        return None
+    entry = {"status": record["status"], "result": None, "error": record["error"] or None}
+    if record["status"] == JobStatus.DONE.value and (record["zip_path"] or record["output_paths"]):
+        entry["result"] = {
+            "prompt": record["prompt"],
+            "quality_tier": record["quality_tier"],
+            "validation": record["validation"],
+            "zip_path": record["zip_path"],
+            "output_paths": record["output_paths"],
+        }
+    return entry
 
 
 class GenerateResponse(BaseModel):
@@ -261,6 +304,7 @@ def execute_plan(
 
         queue = get_task_queue()
         queue.submit(_run_batch_item, job_id, pipe, item, output_dir, batch_id, user_id)
+        _persist_job(job_id, JobStatus.PENDING.value, batch_id=batch_id)
 
     _batch_jobs[batch_id] = job_ids
 
@@ -352,6 +396,8 @@ def _run_generation_job(pipe, controls, req, output_dir, job_id, user_id=None):
     if user_id:
         credits.ensure_user_exists(user_id)
 
+    _persist_job(job_id, JobStatus.RUNNING.value)
+
     original_config = pipe.config
     from copy import deepcopy
     config = deepcopy(pipe.config)
@@ -393,39 +439,61 @@ def _run_generation_job(pipe, controls, req, output_dir, job_id, user_id=None):
             "zip_path": cached.zip_path,
             "cached": True,
         })
+        _persist_job(
+            job_id,
+            JobStatus.DONE.value,
+            prompt=cached.prompt,
+            quality_tier=cached.quality_tier,
+            validation=cached.metadata.get("validation", {}),
+            zip_path=cached.zip_path,
+            output_paths=cached.output_paths,
+        )
         return result
 
     try:
         result = pipe.run(controls, output_dir=output_dir)
+
+        _deduct_credits_for_job(user_id, req.num_frames, credits)
+
+        _storage.add_job(job_id, {
+            "prompt": result.metadata["prompt"],
+            "quality_tier": result.validation[0]["quality_tier"],
+            "outputs": result.output_paths,
+            "zip_path": result.zip_path,
+        })
+
+        _upload_to_r2(_r2_storage, job_id, result.output_paths, result.zip_path)
+
+        meta = {"view": req.view, "animation": req.animation, "palette": req.palette, "sprite_size": req.sprite_size, "style": req.style}
+        meta["generation_hash"] = gen_hash
+        meta["validation"] = result.validation[0] if result.validation else {}
+
+        _library.add_asset(AssetRecord(
+            asset_id=job_id,
+            job_id=job_id,
+            asset_type=req.asset_type,
+            prompt=result.metadata["prompt"],
+            quality_tier=result.validation[0]["quality_tier"],
+            zip_path=result.zip_path,
+            output_paths=result.output_paths,
+            metadata=meta,
+            generation_hash=gen_hash,
+        ))
+    except Exception as exc:
+        _persist_job(job_id, JobStatus.FAILED.value, error=str(exc))
+        raise
     finally:
         pipe.config = original_config
 
-    _deduct_credits_for_job(user_id, req.num_frames, credits)
-
-    _storage.add_job(job_id, {
-        "prompt": result.metadata["prompt"],
-        "quality_tier": result.validation[0]["quality_tier"],
-        "outputs": result.output_paths,
-        "zip_path": result.zip_path,
-    })
-
-    _upload_to_r2(_r2_storage, job_id, result.output_paths, result.zip_path)
-
-    meta = {"view": req.view, "animation": req.animation, "palette": req.palette, "sprite_size": req.sprite_size, "style": req.style}
-    meta["generation_hash"] = gen_hash
-    meta["validation"] = result.validation[0] if result.validation else {}
-
-    _library.add_asset(AssetRecord(
-        asset_id=job_id,
-        job_id=job_id,
-        asset_type=req.asset_type,
+    _persist_job(
+        job_id,
+        JobStatus.DONE.value,
         prompt=result.metadata["prompt"],
         quality_tier=result.validation[0]["quality_tier"],
+        validation=result.validation[0] if result.validation else {},
         zip_path=result.zip_path,
         output_paths=result.output_paths,
-        metadata=meta,
-        generation_hash=gen_hash,
-    ))
+    )
 
     return {
         "prompt": result.metadata["prompt"],
@@ -473,6 +541,7 @@ def generate(
 
     queue = get_task_queue()
     queue.submit(_run_generation_job, job_id, pipe, controls, req, output_dir, job_id, user_id)
+    _persist_job(job_id, JobStatus.PENDING.value)
 
     return GenerateResponse(job_id=job_id, status=JobStatus.PENDING)
 
@@ -482,9 +551,11 @@ def get_job_status(job_id: str):
     queue = get_task_queue()
     job = queue.get_status(job_id)
     if job is None:
+        job = _stored_job_as_queue_entry(job_id)
+    if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    resp = JobStatusResponse(job_id=job_id, status=job["status"].value)
+    resp = JobStatusResponse(job_id=job_id, status=job["status"].value if isinstance(job["status"], JobStatus) else job["status"])
     if job["result"] is not None:
         resp.prompt = job["result"].get("prompt")
         resp.quality_tier = job["result"].get("quality_tier")
@@ -530,6 +601,7 @@ def generate_batch(
 
         queue = get_task_queue()
         queue.submit(_run_batch_item, job_id, pipe, item, output_dir, batch_id, user_id)
+        _persist_job(job_id, JobStatus.PENDING.value, batch_id=batch_id)
 
     _batch_jobs[batch_id] = job_ids
 
@@ -545,6 +617,9 @@ def _run_batch_item(pipe, item, output_dir, batch_id, user_id=None):
     credits = get_credit_manager()
     if user_id:
         credits.ensure_user_exists(user_id)
+
+    job_id = os.path.basename(output_dir.rstrip("/\\"))
+    _persist_job(job_id, JobStatus.RUNNING.value, batch_id=batch_id)
 
     controls = AssetControls(
         asset_type=AssetType(item.asset_type),
@@ -592,6 +667,16 @@ def _run_batch_item(pipe, item, output_dir, batch_id, user_id=None):
             "batch_id": batch_id,
             "cached": True,
         })
+        _persist_job(
+            job_id,
+            JobStatus.DONE.value,
+            batch_id=batch_id,
+            prompt=cached.prompt,
+            quality_tier=cached.quality_tier,
+            validation=cached.metadata.get("validation", {}),
+            zip_path=cached.zip_path,
+            output_paths=cached.output_paths,
+        )
         return {
             "prompt": cached.prompt,
             "quality_tier": cached.quality_tier,
@@ -600,39 +685,54 @@ def _run_batch_item(pipe, item, output_dir, batch_id, user_id=None):
             "output_paths": cached.output_paths,
         }
 
-    try:
-        result = pipe.run(controls, output_dir=output_dir)
-    finally:
-        pipe.config = original_config
     job_id = os.path.basename(output_dir.rstrip("/\\"))
 
-    _deduct_credits_for_job(user_id, item.num_frames, credits)
+    try:
+        result = pipe.run(controls, output_dir=output_dir)
 
-    _upload_to_r2(_r2_storage, job_id, result.output_paths, result.zip_path)
+        _deduct_credits_for_job(user_id, item.num_frames, credits)
 
-    _storage.add_job(job_id, {
-        "prompt": result.metadata["prompt"],
-        "quality_tier": result.validation[0]["quality_tier"],
-        "outputs": result.output_paths,
-        "zip_path": result.zip_path,
-        "batch_id": batch_id,
-    })
+        _upload_to_r2(_r2_storage, job_id, result.output_paths, result.zip_path)
 
-    meta = {"view": item.view, "animation": item.animation, "palette": item.palette, "sprite_size": item.sprite_size, "style": item.style}
-    meta["generation_hash"] = gen_hash
-    meta["validation"] = result.validation[0] if result.validation else {}
+        _storage.add_job(job_id, {
+            "prompt": result.metadata["prompt"],
+            "quality_tier": result.validation[0]["quality_tier"],
+            "outputs": result.output_paths,
+            "zip_path": result.zip_path,
+            "batch_id": batch_id,
+        })
 
-    _library.add_asset(AssetRecord(
-        asset_id=job_id,
-        job_id=job_id,
-        asset_type=item.asset_type,
+        meta = {"view": item.view, "animation": item.animation, "palette": item.palette, "sprite_size": item.sprite_size, "style": item.style}
+        meta["generation_hash"] = gen_hash
+        meta["validation"] = result.validation[0] if result.validation else {}
+
+        _library.add_asset(AssetRecord(
+            asset_id=job_id,
+            job_id=job_id,
+            asset_type=item.asset_type,
+            prompt=result.metadata["prompt"],
+            quality_tier=result.validation[0]["quality_tier"],
+            zip_path=result.zip_path,
+            output_paths=result.output_paths,
+            metadata=meta,
+            generation_hash=gen_hash,
+        ))
+    except Exception as exc:
+        _persist_job(job_id, JobStatus.FAILED.value, error=str(exc), batch_id=batch_id)
+        raise
+    finally:
+        pipe.config = original_config
+
+    _persist_job(
+        job_id,
+        JobStatus.DONE.value,
+        batch_id=batch_id,
         prompt=result.metadata["prompt"],
         quality_tier=result.validation[0]["quality_tier"],
+        validation=result.validation[0] if result.validation else {},
         zip_path=result.zip_path,
         output_paths=result.output_paths,
-        metadata=meta,
-        generation_hash=gen_hash,
-    ))
+    )
 
     return {
         "prompt": result.metadata["prompt"],
@@ -658,7 +758,7 @@ def get_batch_status(batch_id: str):
     pending = 0
 
     for job_id in job_ids:
-        job = queue.get_status(job_id)
+        job = queue.get_status(job_id) or _stored_job_as_queue_entry(job_id)
         if job is None:
             pending += 1
         elif job["status"] == JobStatus.DONE:

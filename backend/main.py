@@ -1,13 +1,16 @@
+import os
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS
-from backend.api.routes import router, set_pipeline
+from backend.api.routes import router, set_pipeline, set_job_store
 from backend.api.auth_routes import router as auth_router
 from backend.api.billing_routes import router as billing_router
 from backend.api.team_routes import router as team_router
 from backend.modules.pipeline.orchestrator import AssetPipeline
 from backend.modules.rate_limiter import get_rate_limiter, EXEMPT_PATHS
 from backend.modules.tasks.queue import set_task_queue, create_task_queue
+from backend.modules.storage.database import create_database_library
 from backend.modules.logging.correlation import generate_correlation_id, set_correlation_id, get_correlation_id
 from backend.modules.logging.structured_logger import get_logger
 
@@ -22,6 +25,10 @@ logger = get_logger("backend.main")
 set_pipeline(AssetPipeline())
 
 set_task_queue(create_task_queue())
+
+database_url = os.environ.get("DATABASE_URL")
+if database_url:
+    set_job_store(create_database_library(database_url=database_url))
 
 
 @app.middleware("http")

@@ -54,6 +54,33 @@ _TAGS_DDL = """
     )
 """
 
+_JOB_COLUMNS = [
+    "job_id", "status", "prompt", "quality_tier", "validation",
+    "zip_path", "output_paths", "error", "batch_id",
+    "created_at", "updated_at",
+]
+
+_JOB_UPDATE_COLUMNS = [
+    "status", "prompt", "quality_tier", "validation",
+    "zip_path", "output_paths", "error", "batch_id", "updated_at",
+]
+
+_JOBS_DDL = """
+    CREATE TABLE IF NOT EXISTS jobs (
+        job_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        prompt TEXT DEFAULT '',
+        quality_tier TEXT DEFAULT '',
+        validation TEXT DEFAULT '{}',
+        zip_path TEXT,
+        output_paths TEXT DEFAULT '[]',
+        error TEXT DEFAULT '',
+        batch_id TEXT DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+"""
+
 
 def _connect_postgres(database_url: str):
     if not _POSTGRES_AVAILABLE:
@@ -139,6 +166,7 @@ class DatabaseLibrary:
                     self._execute(conn, "PRAGMA journal_mode=WAL")
                 self._execute(conn, _ASSETS_DDL)
                 self._execute(conn, _TAGS_DDL)
+                self._execute(conn, _JOBS_DDL)
                 self._ensure_generation_hash_column(conn)
 
     def _ensure_generation_hash_column(self, conn):
@@ -377,7 +405,114 @@ class DatabaseLibrary:
             )
             return self._row_to_record(cur.fetchone())
 
+    def _insert_job_sql(self) -> str:
+        cols = ", ".join(_JOB_COLUMNS)
+        ph = ", ".join([self._ph] * len(_JOB_COLUMNS))
+        if self.backend == "sqlite":
+            return f"INSERT OR REPLACE INTO jobs ({cols}) VALUES ({ph})"
+        set_cols = [c for c in _JOB_COLUMNS if c not in ("job_id", "created_at")]
+        set_clause = ", ".join(f"{c} = EXCLUDED.{c}" for c in set_cols)
+        return f"INSERT INTO jobs ({cols}) VALUES ({ph}) ON CONFLICT (job_id) DO UPDATE SET {set_clause}"
+
+    def _row_to_job(self, row) -> dict:
+        return {
+            "job_id": row["job_id"],
+            "status": row["status"],
+            "prompt": row["prompt"],
+            "quality_tier": row["quality_tier"],
+            "validation": json.loads(row["validation"]),
+            "zip_path": row["zip_path"],
+            "output_paths": json.loads(row["output_paths"]),
+            "error": row["error"],
+            "batch_id": row["batch_id"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def add_job(
+        self,
+        job_id: str,
+        status: str = "pending",
+        prompt: str = "",
+        quality_tier: str = "",
+        validation=None,
+        zip_path: Optional[str] = None,
+        output_paths=None,
+        error: str = "",
+        batch_id: str = "",
+    ) -> str:
+        now = datetime.utcnow().isoformat() + "Z"
+        params = (
+            job_id, status, prompt, quality_tier, json.dumps(validation or {}),
+            zip_path, json.dumps(output_paths or []), error, batch_id, now, now,
+        )
+        with self._connection() as conn:
+            self._execute(conn, self._insert_job_sql(), params)
+        return job_id
+
+    def get_job(self, job_id: str) -> Optional[dict]:
+        with self._connection() as conn:
+            cur = self._execute(
+                conn, f"SELECT * FROM jobs WHERE job_id = {self._ph}", (job_id,)
+            )
+            row = cur.fetchone()
+            return self._row_to_job(row) if row else None
+
+    def update_job(self, job_id: str, **updates) -> Optional[dict]:
+        with self._connection() as conn:
+            cur = self._execute(
+                conn, f"SELECT * FROM jobs WHERE job_id = {self._ph}", (job_id,)
+            )
+            if cur.fetchone() is None:
+                return None
+            clean = {}
+            for key, value in updates.items():
+                if key not in _JOB_UPDATE_COLUMNS:
+                    continue
+                if key in ("validation", "output_paths"):
+                    value = json.dumps(value)
+                clean[key] = value
+            clean["updated_at"] = datetime.utcnow().isoformat() + "Z"
+            set_clause = ", ".join(f"{c} = {self._ph}" for c in clean)
+            self._execute(
+                conn,
+                f"UPDATE jobs SET {set_clause} WHERE job_id = {self._ph}",
+                list(clean.values()) + [job_id],
+            )
+            cur = self._execute(
+                conn, f"SELECT * FROM jobs WHERE job_id = {self._ph}", (job_id,)
+            )
+            return self._row_to_job(cur.fetchone())
+
+    def list_jobs(
+        self,
+        status: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[dict]:
+        query = "SELECT * FROM jobs WHERE 1=1"
+        params = []
+        if status:
+            query += f" AND status = {self._ph}"
+            params.append(status)
+        query += f" ORDER BY created_at DESC LIMIT {self._ph} OFFSET {self._ph}"
+        params.extend([limit, offset])
+        with self._connection() as conn:
+            cur = self._execute(conn, query, params)
+            return [self._row_to_job(row) for row in cur.fetchall()]
+
+    def count_jobs(self, status: Optional[str] = None) -> int:
+        query = "SELECT COUNT(*) AS count FROM jobs"
+        params = []
+        if status:
+            query += f" WHERE status = {self._ph}"
+            params.append(status)
+        with self._connection() as conn:
+            cur = self._execute(conn, query, params)
+            return cur.fetchone()["count"]
+
     def clear(self):
         with self._connection() as conn:
             self._execute(conn, "DELETE FROM assets")
             self._execute(conn, "DELETE FROM tags")
+            self._execute(conn, "DELETE FROM jobs")

@@ -223,7 +223,7 @@ Only start this once Phase 1 is live and you've used it enough to trust the pipe
 - [x] Introduce Redis + a task queue (Celery, or a lighter alternative like `arq`) —
       only now does concurrent multi-module generation justify this complexity
 - [ ] Migrate SQLite → PostgreSQL once you have actual concurrent users, not before
-- [ ] Add a real jobs table / status polling so the frontend can show generation progress
+- [x] Add a real jobs table / status polling so the frontend can show generation progress
       for longer-running or queued requests
 - [x] Add a basic Asset Library page (list of a user's past generations, re-downloadable)
 
