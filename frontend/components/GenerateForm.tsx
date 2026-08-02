@@ -1,10 +1,16 @@
 import { useState } from "react";
-import { generateAsset, GenerateRequest, GenerateResponse } from "../lib/api";
+import {
+  generateAndWait,
+  getDownloadUrl,
+  GenerateRequest,
+  JobStatusResponse,
+} from "../lib/api";
 
 export default function GenerateForm() {
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<GenerateResponse | null>(null);
+  const [result, setResult] = useState<JobStatusResponse | null>(null);
   const [error, setError] = useState("");
+  const [progress, setProgress] = useState("");
 
   const [form, setForm] = useState<GenerateRequest>({
     asset_type: "character",
@@ -41,13 +47,18 @@ export default function GenerateForm() {
     setLoading(true);
     setError("");
     setResult(null);
+    setProgress("Submitting job...");
     try {
-      const data = await generateAsset(form);
+      const data = await generateAndWait(form, {
+        onStatus: (status) =>
+          setProgress(`Job ${status.job_id}: ${status.status}...`),
+      });
       setResult(data);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Generation failed");
     } finally {
       setLoading(false);
+      setProgress("");
     }
   };
 
@@ -172,6 +183,10 @@ export default function GenerateForm() {
         </button>
       </form>
 
+      {progress && loading && (
+        <div style={{ color: "#7c7cff", marginTop: "1rem" }}>{progress}</div>
+      )}
+
       {error && (
         <div style={{ color: "#ff6b6b", marginTop: "1rem" }}>{error}</div>
       )}
@@ -189,17 +204,23 @@ export default function GenerateForm() {
           <p>
             <strong>Job ID:</strong> {result.job_id}
           </p>
-          <p>
-            <strong>Prompt:</strong> {result.prompt}
-          </p>
-          <p>
-            <strong>Quality:</strong> {result.quality_tier}
-          </p>
-          <p>
-            <strong>Outputs:</strong> {result.output_paths.join(", ")}
-          </p>
+          {result.prompt && (
+            <p>
+              <strong>Prompt:</strong> {result.prompt}
+            </p>
+          )}
+          {result.quality_tier && (
+            <p>
+              <strong>Quality:</strong> {result.quality_tier}
+            </p>
+          )}
+          {result.output_paths && result.output_paths.length > 0 && (
+            <p>
+              <strong>Outputs:</strong> {result.output_paths.join(", ")}
+            </p>
+          )}
           {result.zip_path && (
-            <a href={`/api/download/${result.job_id}`} download>
+            <a href={getDownloadUrl(result.job_id)} download>
               Download ZIP
             </a>
           )}

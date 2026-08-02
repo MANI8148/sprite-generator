@@ -1,6 +1,8 @@
 import {
   checkHealth,
   generateAsset,
+  getJobStatus,
+  generateAndWait,
   getHistory,
   getDownloadUrl,
   register,
@@ -56,14 +58,10 @@ describe("checkHealth", () => {
 });
 
 describe("generateAsset", () => {
-  it("sends POST and returns response", async () => {
+  it("sends POST and returns the queued job", async () => {
     const mockResponse = {
       job_id: "abc123",
-      prompt: "test prompt",
-      quality_tier: "clean",
-      validation: {},
-      zip_path: "/tmp/test.zip",
-      output_paths: ["/tmp/test.png"],
+      status: "pending",
     };
 
     (global.fetch as jest.Mock).mockResolvedValue({
@@ -73,7 +71,117 @@ describe("generateAsset", () => {
 
     const result = await generateAsset({ asset_type: "character" });
     expect(result.job_id).toBe("abc123");
+    expect(result.status).toBe("pending");
+    const [url, init] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(url).toContain("/generate");
+    expect(init.method).toBe("POST");
+  });
+
+  it("throws on failure", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: async () => "Generator not set",
+    });
+
+    await expect(generateAsset({ asset_type: "character" })).rejects.toThrow(
+      "Generate failed: 503 Generator not set"
+    );
+  });
+});
+
+describe("getJobStatus", () => {
+  it("returns the job status", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        job_id: "abc123",
+        status: "done",
+        prompt: "test prompt",
+        quality_tier: "clean",
+      }),
+    });
+
+    const result = await getJobStatus("abc123");
+    expect(result.status).toBe("done");
     expect(result.prompt).toBe("test prompt");
+    const [url] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(url).toContain("/status/abc123");
+  });
+
+  it("throws on failure", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: async () => "Job not found",
+    });
+
+    await expect(getJobStatus("missing")).rejects.toThrow(
+      "Status fetch failed: 404 Job not found"
+    );
+  });
+});
+
+describe("generateAndWait", () => {
+  it("polls until the job is done", async () => {
+    const calls = jest.fn();
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ job_id: "abc123", status: "pending" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ job_id: "abc123", status: "running" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          job_id: "abc123",
+          status: "done",
+          prompt: "test prompt",
+          quality_tier: "clean",
+          output_paths: ["/tmp/test.png"],
+        }),
+      });
+
+    const result = await generateAndWait(
+      { asset_type: "character" },
+      { pollIntervalMs: 5, onStatus: (s) => calls(s.status) }
+    );
+
+    expect(result.status).toBe("done");
+    expect(result.prompt).toBe("test prompt");
+    expect(calls).toHaveBeenCalledWith("pending");
+    expect(calls).toHaveBeenCalledWith("running");
+    expect(calls).toHaveBeenCalledWith("done");
+  });
+
+  it("throws when the job fails", async () => {
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ job_id: "abc123", status: "pending" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ job_id: "abc123", status: "failed", error: "boom" }),
+      });
+
+    await expect(
+      generateAndWait({ asset_type: "character" }, { pollIntervalMs: 5 })
+    ).rejects.toThrow("boom");
+  });
+
+  it("times out when the job never completes", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ job_id: "abc123", status: "pending" }),
+    });
+
+    await expect(
+      generateAndWait({ asset_type: "character" }, { pollIntervalMs: 5, timeoutMs: 20 })
+    ).rejects.toThrow("Timed out waiting for job abc123");
   });
 });
 

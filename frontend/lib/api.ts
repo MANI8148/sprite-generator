@@ -18,13 +18,20 @@ export interface GenerateRequest {
   num_frames?: number;
 }
 
-export interface GenerateResponse {
+export interface GenerateSubmission {
   job_id: string;
-  prompt: string;
-  quality_tier: string;
-  validation: Record<string, unknown>;
-  zip_path: string | null;
-  output_paths: string[];
+  status: string;
+}
+
+export interface JobStatusResponse {
+  job_id: string;
+  status: string;
+  prompt?: string;
+  quality_tier?: string;
+  validation?: Record<string, unknown>;
+  zip_path?: string | null;
+  output_paths?: string[];
+  error?: string;
 }
 
 export interface HealthResponse {
@@ -120,7 +127,7 @@ export async function checkHealth(): Promise<HealthResponse> {
 
 export async function generateAsset(
   req: GenerateRequest
-): Promise<GenerateResponse> {
+): Promise<GenerateSubmission> {
   const res = await fetch(`${API_BASE}/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -128,6 +135,46 @@ export async function generateAsset(
   });
   if (!res.ok) throw new Error(`Generate failed: ${res.status} ${await res.text()}`);
   return res.json();
+}
+
+export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
+  const res = await fetch(`${API_BASE}/status/${jobId}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`Status fetch failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export interface GenerateAndWaitOptions {
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+  onStatus?: (status: JobStatusResponse) => void;
+}
+
+export async function generateAndWait(
+  req: GenerateRequest,
+  opts: GenerateAndWaitOptions = {}
+): Promise<JobStatusResponse> {
+  const { pollIntervalMs = 500, timeoutMs = 120000 } = opts;
+  const submission = await generateAsset(req);
+  const jobId = submission.job_id;
+  opts.onStatus?.(submission as JobStatusResponse);
+  const deadline = Date.now() + timeoutMs;
+
+  while (true) {
+    const status = await getJobStatus(jobId);
+    opts.onStatus?.(status);
+    if (status.status === "done") return status;
+    if (status.status === "failed") {
+      throw new Error(status.error || `Generation failed for job ${jobId}`);
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`Timed out waiting for job ${jobId}`);
+    }
+    await sleep(pollIntervalMs);
+  }
 }
 
 export async function getHistory(): Promise<HistoryEntry[]> {

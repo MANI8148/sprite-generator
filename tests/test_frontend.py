@@ -138,8 +138,14 @@ class TestFrontendApi:
 
     def test_api_has_interfaces(self):
         content = (FRONTEND / "lib" / "api.ts").read_text()
-        for iface in ["GenerateRequest", "GenerateResponse", "HealthResponse", "HistoryEntry"]:
+        for iface in ["GenerateRequest", "GenerateSubmission", "JobStatusResponse", "HealthResponse", "HistoryEntry"]:
             assert iface in content, f"API missing interface: {iface}"
+
+    def test_api_has_job_status_polling(self):
+        content = (FRONTEND / "lib" / "api.ts").read_text()
+        for fn in ["getJobStatus", "generateAndWait"]:
+            assert fn in content, f"API missing function: {fn}"
+        assert "/status/" in content
 
     def test_api_base_url_configurable(self):
         content = (FRONTEND / "lib" / "api.ts").read_text()
