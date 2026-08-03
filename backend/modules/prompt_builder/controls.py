@@ -70,4 +70,5 @@ class AssetControls:
     style: str = "pixel art"
     background: str = "transparent"
     custom_prompt: str = ""
+    custom_palette_description: str = ""
     seed: int = -1

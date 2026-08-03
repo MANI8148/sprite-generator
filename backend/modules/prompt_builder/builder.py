@@ -22,7 +22,7 @@ SIZE_KEYWORDS = {
     SpriteSize.S_16: "tiny 16x16 sprite, small",
     SpriteSize.S_32: "32x32 sprite, medium",
     SpriteSize.S_64: "64x64 sprite, large",
-    SpriteSize.S_128: "128x64 sprite, detailed",
+    SpriteSize.S_128: "128x128 sprite, detailed",
 }
 
 VIEW_KEYWORDS = {
@@ -66,9 +66,13 @@ def build_prompt(controls: AssetControls) -> str:
 
     # Palette
     if controls.palette != Palette.AUTO:
-        pal_str = PALETTE_KEYWORDS.get(controls.palette)
-        if pal_str:
-            parts.append(pal_str)
+        if controls.palette == Palette.CUSTOM:
+            if controls.custom_palette_description:
+                parts.append(f"{controls.custom_palette_description}, custom color palette")
+        else:
+            pal_str = PALETTE_KEYWORDS.get(controls.palette)
+            if pal_str:
+                parts.append(pal_str)
 
     # Size guidance
     size_str = SIZE_KEYWORDS.get(controls.sprite_size)
@@ -131,6 +135,8 @@ def build_negative_prompt(controls: AssetControls) -> str:
         parts.append("multiple colors, bright colors, gradients")
     elif controls.palette in (Palette.RETRO_8, Palette.GAMEBOY):
         parts.append("too many colors, smooth gradients, anti-aliasing")
+    elif controls.palette == Palette.CUSTOM:
+        parts.append("too many colors, rainbow, smooth gradients, anti-aliasing")
 
     if controls.sprite_size == SpriteSize.S_16:
         parts.append("details too small for 16x16, over-detailed")

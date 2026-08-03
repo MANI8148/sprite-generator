@@ -144,7 +144,8 @@ class TestSpritesize:
     def test_s_128(self):
         controls = AssetControls(sprite_size=SpriteSize.S_128, animation=Animation.NONE)
         prompt = build_prompt(controls)
-        assert "128x64" in prompt
+        assert "128x128" in prompt
+        assert "128x64" not in prompt
 
 
 class TestPalette:
@@ -177,6 +178,60 @@ class TestPalette:
         controls = AssetControls(palette=Palette.SNES, animation=Animation.NONE)
         prompt = build_prompt(controls)
         assert "SNES" in prompt or "16-bit" in prompt
+
+
+class TestCustomPalette:
+    def test_custom_palette_with_description(self):
+        controls = AssetControls(
+            palette=Palette.CUSTOM,
+            custom_palette_description="pastel lavender, mint, peach",
+            animation=Animation.NONE,
+        )
+        prompt = build_prompt(controls)
+        assert "pastel lavender, mint, peach" in prompt
+        assert "custom color palette" in prompt
+
+    def test_custom_palette_empty_description(self):
+        controls = AssetControls(palette=Palette.CUSTOM, animation=Animation.NONE)
+        prompt = build_prompt(controls)
+        assert "custom color palette" not in prompt
+        assert "custom" not in prompt
+
+    def test_custom_palette_not_used_for_other_palettes(self):
+        controls = AssetControls(
+            palette=Palette.RETRO_16,
+            custom_palette_description="pastel lavender",
+            animation=Animation.NONE,
+        )
+        prompt = build_prompt(controls)
+        assert "pastel lavender" not in prompt
+        assert "16-color" in prompt or "GameBoy Advance" in prompt
+
+    def test_custom_palette_negative_prompt(self):
+        controls = AssetControls(palette=Palette.CUSTOM, animation=Animation.NONE)
+        neg = build_negative_prompt(controls)
+        assert "too many colors" in neg
+        assert "rainbow" in neg
+
+    def test_custom_palette_default_does_not_add_color_negative(self):
+        controls = AssetControls(animation=Animation.NONE)
+        neg = build_negative_prompt(controls)
+        assert "rainbow" not in neg
+
+    def test_custom_palette_combined_with_full_controls(self):
+        controls = AssetControls(
+            asset_type=AssetType.CHARACTER,
+            view=View.FRONT,
+            animation=Animation.IDLE,
+            palette=Palette.CUSTOM,
+            custom_palette_description="forest greens and earth browns",
+            sprite_size=SpriteSize.S_32,
+            theme="forest",
+        )
+        prompt = build_prompt(controls)
+        assert "forest greens and earth browns" in prompt
+        assert "custom color palette" in prompt
+        assert "forest" in prompt
 
 
 class TestTheme:
