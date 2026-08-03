@@ -186,8 +186,10 @@ usable, demoable checkpoint — not a pile of half-built infrastructure.
 
 - [ ] Let the current VQ-VAE training run complete (or reach a quality plateau) —
       don't abandon it mid-run for the LoRA pivot without a clean stopping point
-- [ ] Visually validate reconstructions AND, once Step 6 runs, generated samples —
+- [x] Visually validate reconstructions AND, once Step 6 runs, generated samples —
       loss numbers looking good is not the same as sprites looking good
+      (automated quality gate in `eval/quality_gate.py` combines PSNR/MSE with the
+      production sprite-quality validation and emits a pass/fail report)
 - [ ] Decide: continue with VQ-VAE+Transformer, OR pivot fully to SD1.5+LoRA/DreamBooth,
       OR run both and compare — don't build a website around an unvalidated model
 - [ ] Rotate/confirm the HF token issue from earlier is resolved (if not already done)
