@@ -18,7 +18,7 @@ from backend.modules.style_engine import StyleEngine, STYLE_PRESETS
 from backend.modules.asset_memory import compute_generation_hash
 from backend.modules.auth import OptionalAuth, TokenData
 from backend.modules.billing import CreditManager, get_credit_manager, UsageTracker, get_usage_tracker
-from backend.modules.project_director import ProjectDirector, ProjectPlan
+from backend.modules.project_director import ProjectDirector, ProjectPlan, LLMProjectDirector
 
 router = APIRouter()
 
@@ -218,7 +218,7 @@ class BatchStatusResponse(BaseModel):
     results: List[BatchResult] = []
 
 
-_director: ProjectDirector = ProjectDirector()
+_director: ProjectDirector = LLMProjectDirector()
 
 
 def get_director() -> ProjectDirector:
