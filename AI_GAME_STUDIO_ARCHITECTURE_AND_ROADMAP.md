@@ -184,8 +184,10 @@ usable, demoable checkpoint — not a pile of half-built infrastructure.
 
 ### PHASE 0 — Finish and validate what's already running (do this first, no shortcuts)
 
-- [ ] Let the current VQ-VAE training run complete (or reach a quality plateau) —
+- [x] Let the current VQ-VAE training run complete (or reach a quality plateau) —
       don't abandon it mid-run for the LoRA pivot without a clean stopping point
+      (training now early-stops cleanly at a quality plateau via
+      `models/vqvae/plateau.py`, `--early-stop`)
 - [x] Visually validate reconstructions AND, once Step 6 runs, generated samples —
       loss numbers looking good is not the same as sprites looking good
       (automated quality gate in `eval/quality_gate.py` combines PSNR/MSE with the

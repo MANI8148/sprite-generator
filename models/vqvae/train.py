@@ -15,6 +15,7 @@ import numpy as np
 
 warnings.filterwarnings("ignore")
 from models.vqvae.model import ImprovedVQVAE
+from models.vqvae.plateau import PlateauStopper
 
 
 class SpriteDataset(torch.utils.data.Dataset):
@@ -68,7 +69,8 @@ def load_palette(dataset_path):
         return []
 
 
-def main():
+def build_parser():
+    """Build the VQ-VAE training CLI parser (extracted for testability)."""
     parser = argparse.ArgumentParser(description="Train Improved VQ-VAE")
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--image-size", type=int, default=32)
@@ -90,6 +92,23 @@ def main():
     parser.add_argument("--lambda-palette", type=float, default=0.1, help="Palette histogram loss weight")
     parser.add_argument("--lambda-adv", type=float, default=0.1, help="Adversarial loss weight")
     parser.add_argument("--no-augment", action="store_true")
+    parser.add_argument(
+        "--early-stop", action="store_true",
+        help="Stop cleanly once the loss reaches a quality plateau "
+             "(no improvement for --patience epochs). Gives the run a clean "
+             "stopping point instead of grinding to --epochs blindly.",
+    )
+    parser.add_argument("--patience", type=int, default=15,
+                        help="Epochs without improvement before early stopping")
+    parser.add_argument("--min-delta", type=float, default=1e-4,
+                        help="Minimum absolute loss change counted as improvement")
+    parser.add_argument("--min-epochs", type=int, default=20,
+                        help="Do not early-stop before this many epochs have run")
+    return parser
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -141,6 +160,12 @@ def main():
 
     vis_batch = next(iter(dataloader))
     scaler = torch.cuda.amp.GradScaler(enabled=torch.cuda.is_available())
+
+    stopper = PlateauStopper(
+        patience=args.patience,
+        min_delta=args.min_delta,
+        min_epochs=args.min_epochs,
+    ) if args.early_stop else None
 
     for epoch in range(start_epoch, args.epochs):
         model.train()
@@ -214,7 +239,8 @@ def main():
         scheduler_d.step()
 
         n = len(dataloader)
-        print(f"Epoch {epoch+1}: G={total_g_loss/n:.4f} recon={total_recon/n:.4f} "
+        epoch_loss = total_g_loss / n
+        print(f"Epoch {epoch+1}: G={epoch_loss:.4f} recon={total_recon/n:.4f} "
               f"vq={total_vq/n:.4f} perc={total_perc/n:.4f} ffl={total_ffl/n:.4f} "
               f"edge={total_edge/n:.4f} adv={total_adv/n:.4f} "
               f"lr={scheduler_g.get_last_lr()[0]:.2e}")
@@ -229,7 +255,8 @@ def main():
             "model_state": model.state_dict(),
             "optimizer_g_state": optimizer_g.state_dict(),
             "optimizer_d_state": optimizer_d.state_dict(),
-            "loss": total_g_loss / n,
+            "loss": epoch_loss,
+            "stop_reason": stopper.stop_reason if (stopper and stopper.stopped) else None,
             "config": {
                 "image_size": args.image_size,
                 "hidden_dim": args.hidden_dim,
@@ -253,12 +280,18 @@ def main():
             )
             print(f"  -> Pushed to HF (epoch {epoch+1})")
 
+        if stopper is not None and stopper.step(epoch + 1, epoch_loss):
+            print(f"[early-stop] {stopper.stop_reason}")
+            break
+
     if args.hf_repo and args.hf_token:
         api = HfApi(token=args.hf_token)
         api.upload_file(
             path_or_fileobj=json.dumps({
-                "status": "complete",
-                "vqvae_epochs": args.epochs,
+                "status": "early_stopped" if (stopper and stopper.stopped) else "complete",
+                "stop_reason": stopper.stop_reason if (stopper and stopper.stopped) else None,
+                "best_epoch": stopper.best_epoch if (stopper and stopper.best_epoch) else None,
+                "vqvae_epochs": (stopper.stop_epoch if (stopper and stopper.stopped) else args.epochs),
                 "config": {"hidden_dim": args.hidden_dim, "latent_dim": args.latent_dim, "num_embeddings": args.num_embeddings}
             }).encode(),
             path_in_repo="training_complete.json",
