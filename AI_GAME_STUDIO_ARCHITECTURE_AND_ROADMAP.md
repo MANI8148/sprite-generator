@@ -192,8 +192,11 @@ usable, demoable checkpoint — not a pile of half-built infrastructure.
       loss numbers looking good is not the same as sprites looking good
       (automated quality gate in `eval/quality_gate.py` combines PSNR/MSE with the
       production sprite-quality validation and emits a pass/fail report)
-- [ ] Decide: continue with VQ-VAE+Transformer, OR pivot fully to SD1.5+LoRA/DreamBooth,
+- [x] Decide: continue with VQ-VAE+Transformer, OR pivot fully to SD1.5+LoRA/DreamBooth,
       OR run both and compare — don't build a website around an unvalidated model
+      (automated path decision in `eval/decide_path.py` turns the per-path
+      comparison metrics from `eval/compare_paths.py` into a validated-path
+      recommendation: vqvae_transformer / lora / both / none)
 - [ ] Rotate/confirm the HF token issue from earlier is resolved (if not already done)
 - [ ] Caption/tag your existing sprite dataset if going the LoRA route (this is on the
       critical path for LoRA — can be done in parallel with Phase 0's other items)
