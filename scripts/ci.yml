@@ -30,5 +30,8 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
+      - name: Verify no hardcoded credentials
+        run: python -m scripts.hf_token_hygiene
+
       - name: Run tests
         run: python -m pytest tests/ -v --tb=short

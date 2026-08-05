@@ -197,7 +197,10 @@ usable, demoable checkpoint — not a pile of half-built infrastructure.
       (automated path decision in `eval/decide_path.py` turns the per-path
       comparison metrics from `eval/compare_paths.py` into a validated-path
       recommendation: vqvae_transformer / lora / both / none)
-- [ ] Rotate/confirm the HF token issue from earlier is resolved (if not already done)
+- [x] Rotate/confirm the HF token issue from earlier is resolved (if not already done)
+      (confirm half automated: `scripts/hf_token_hygiene.py` + CI step forbid
+      committed credentials and require `${{ secrets.* }}` in workflows; rotating
+      a leaked token itself remains a manual ops step)
 - [ ] Caption/tag your existing sprite dataset if going the LoRA route (this is on the
       critical path for LoRA — can be done in parallel with Phase 0's other items)
 
