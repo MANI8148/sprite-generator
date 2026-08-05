@@ -31,6 +31,7 @@ export interface JobStatusResponse {
   validation?: Record<string, unknown>;
   zip_path?: string | null;
   output_paths?: string[];
+  cached?: boolean;
   error?: string;
 }
 

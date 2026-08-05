@@ -135,6 +135,7 @@ class JobStatusResponse(BaseModel):
     validation: Optional[dict] = None
     zip_path: Optional[str] = None
     output_paths: Optional[List[str]] = None
+    cached: bool = False
     error: Optional[str] = None
 
 
@@ -198,6 +199,7 @@ class BatchResult(BaseModel):
     validation: dict
     zip_path: Optional[str]
     output_paths: List[str]
+    cached: bool = False
 
 
 class BatchGenerateResponse(BaseModel):
@@ -562,6 +564,7 @@ def get_job_status(job_id: str):
         resp.validation = job["result"].get("validation")
         resp.zip_path = job["result"].get("zip_path")
         resp.output_paths = job["result"].get("output_paths")
+        resp.cached = bool(job["result"].get("cached", False))
     if job["error"] is not None:
         resp.error = job["error"]
     return resp
@@ -683,6 +686,7 @@ def _run_batch_item(pipe, item, output_dir, batch_id, user_id=None):
             "validation": cached.metadata.get("validation", {}),
             "zip_path": cached.zip_path,
             "output_paths": cached.output_paths,
+            "cached": True,
         }
 
     job_id = os.path.basename(output_dir.rstrip("/\\"))
@@ -771,6 +775,7 @@ def get_batch_status(batch_id: str):
                     validation=job["result"].get("validation", {}),
                     zip_path=job["result"].get("zip_path"),
                     output_paths=job["result"].get("output_paths", []),
+                    cached=bool(job["result"].get("cached", False)),
                 ))
         elif job["status"] == JobStatus.FAILED:
             failed += 1

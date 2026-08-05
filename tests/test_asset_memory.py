@@ -173,14 +173,18 @@ class TestAssetMemoryAPI:
         reset_state()
 
     @pytest.fixture
-    def client(self):
+    def fake_gen(self):
+        return FakeGenerator()
+
+    @pytest.fixture
+    def client(self, fake_gen):
         pipe = AssetPipeline()
-        pipe.set_generator(FakeGenerator())
+        pipe.set_generator(fake_gen)
         set_pipeline(pipe)
         set_generator_loaded(True)
         return TestClient(app)
 
-    def test_repeat_generation_uses_cache(self, client):
+    def test_repeat_generation_uses_cache(self, client, fake_gen):
         resp1 = client.post("/generate", json={
             "asset_type": "character",
             "view": "front",
@@ -193,6 +197,9 @@ class TestAssetMemoryAPI:
         job_id_1 = resp1.json()["job_id"]
         data1 = poll_job(client, job_id_1)
         assert data1["status"] == "done"
+        calls_after_first = fake_gen._call_count[0]
+        assert calls_after_first == 1, "first generation must invoke the generator exactly once"
+        assert data1["cached"] is False
 
         resp2 = client.post("/generate", json={
             "asset_type": "character",
@@ -208,8 +215,12 @@ class TestAssetMemoryAPI:
         assert data2["status"] == "done"
 
         assert data1["quality_tier"] == data2["quality_tier"]
+        assert data2["cached"] is True, "identical second request must be served from cache"
+        assert fake_gen._call_count[0] == calls_after_first, (
+            "cached repeat must not re-run the generator"
+        )
 
-    def test_different_parameters_do_not_cache(self, client):
+    def test_different_parameters_do_not_cache(self, client, fake_gen):
         resp1 = client.post("/generate", json={
             "asset_type": "character",
             "view": "front",
@@ -221,6 +232,7 @@ class TestAssetMemoryAPI:
         assert resp1.status_code == 202
         data1 = poll_job(client, resp1.json()["job_id"])
         assert data1["status"] == "done"
+        calls_after_first = fake_gen._call_count[0]
 
         resp2 = client.post("/generate", json={
             "asset_type": "enemy",
@@ -233,6 +245,10 @@ class TestAssetMemoryAPI:
         assert resp2.status_code == 202
         data2 = poll_job(client, resp2.json()["job_id"])
         assert data2["status"] == "done"
+        assert fake_gen._call_count[0] == calls_after_first + 1, (
+            "different parameters must miss the cache and re-run the generator"
+        )
+        assert data2["cached"] is False
 
         resp3 = client.post("/generate", json={
             "asset_type": "character",
@@ -247,8 +263,13 @@ class TestAssetMemoryAPI:
         assert data3["status"] == "done"
 
         assert data1["quality_tier"] == data3["quality_tier"]
+        assert data3["cached"] is True, "repeat of the first params must hit the cache"
+        assert fake_gen._call_count[0] == calls_after_first + 1, (
+            "cached third request must not re-run the generator"
+        )
 
-    def test_cache_works_across_multiple_identical_requests(self, client):
+    def test_cache_works_across_multiple_identical_requests(self, client, fake_gen):
+        set_task_queue(TaskQueue(max_workers=1))
         job_ids = []
         for _ in range(3):
             resp = client.post("/generate", json={
@@ -264,6 +285,9 @@ class TestAssetMemoryAPI:
             assert r["status"] == "done"
         tiers = [r["quality_tier"] for r in results]
         assert len(set(tiers)) == 1
+        cached_flags = [r["cached"] for r in results]
+        assert any(cached_flags), "at least one identical request must be served from cache"
+        assert fake_gen._call_count[0] == 1, "three identical requests must generate only once"
 
     def test_generation_hash_in_asset_library(self, client):
         resp = client.post("/generate", json={
@@ -279,7 +303,8 @@ class TestAssetMemoryAPI:
         history = client.get("/history").json()
         assert len(history) > 0
 
-    def test_batch_generation_respects_cache(self, client):
+    def test_batch_generation_respects_cache(self, client, fake_gen):
+        set_task_queue(TaskQueue(max_workers=1))
         resp = client.post("/generate/batch", json={
             "items": [
                 {"asset_type": "character", "view": "front", "seed": 1},
@@ -298,3 +323,9 @@ class TestAssetMemoryAPI:
         batch_status = client.get(f"/batch-status/{batch_id}").json()
         assert batch_status["status"] == "done"
         assert len(batch_status["results"]) == 3
+
+        cached_flags = [r["cached"] for r in batch_status["results"]]
+        assert sum(cached_flags) == 1, "only the duplicate batch item should be served from cache"
+        assert fake_gen._call_count[0] == 2, (
+            "two unique batch items must generate exactly twice"
+        )
