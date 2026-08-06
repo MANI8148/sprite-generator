@@ -151,6 +151,32 @@ def labels_to_caption(labels: dict, prefix: str = "pixel art sprite") -> str:
     return " ".join(parts)
 
 
+def caption_and_tag(entry: dict, labels: dict) -> dict:
+    """Merge structured labels and a natural-language caption into a metadata entry.
+
+    Every tagged sprite therefore carries a LoRA-ready caption string (critical
+    path for SD 1.5 LoRA training) alongside the structured class/action/direction
+    fields used for filtering and augmentation.
+    """
+    entry.update(labels)
+    entry["caption"] = labels_to_caption(labels)
+    return entry
+
+
+def write_caption_txt(entry: dict, output_dir: Path) -> None:
+    """Write a ``<stem>.txt`` caption file next to the sprite image.
+
+    SD 1.5 / LoRA trainers expect an image + same-stem ``.txt`` caption pair per
+    training sample, so the dataset is immediately consumable without regenerating
+    captions at train time.
+    """
+    if not entry.get("caption"):
+        return
+    stem = Path(entry.get("filename", "sprite")).stem
+    txt_path = Path(output_dir) / f"{stem}.txt"
+    txt_path.write_text(entry["caption"], encoding="utf-8")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Auto-label sprites with AI")
     parser.add_argument("--input", "-i", default="data/processed",
@@ -170,15 +196,17 @@ def main():
 
     for entry in tqdm(metadata, desc="Captioning sprites"):
         img_path = input_dir / entry["filename"]
+        labels = {"class": "unknown", "action": "idle", "direction": "front"}
         try:
             img = Image.open(img_path).convert("RGBA")
             if use_api:
                 labels = caption_with_api(img, args.hf_token, args.model)
             else:
                 labels = caption_locally(img)
-            entry.update(labels)
         except Exception:
-            entry.update({"class": "unknown", "action": "idle", "direction": "front"})
+            pass
+        caption_and_tag(entry, labels)
+        write_caption_txt(entry, input_dir)
 
     output_path = Path(args.output)
     with open(output_path, "w") as f:

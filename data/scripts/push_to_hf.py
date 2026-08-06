@@ -19,6 +19,67 @@ def load_metadata(metadata_path: Path) -> list:
         return json.load(f)
 
 
+def build_dataset(metadata: list, input_dir: Path):
+    """Build a HF Dataset (plus palette) from labeled metadata.
+
+    Extracted from main() so the caption column (and image loading) can be
+    exercised without a network round-trip.
+    """
+    palette = []
+    palette_path = input_dir / "palette.json"
+    if palette_path.exists():
+        with open(palette_path) as f:
+            palette = json.load(f)
+
+    images = []
+    classes = []
+    actions = []
+    directions = []
+    captions = []
+    augmented_list = []
+    flipped_list = []
+    source_ids = []
+
+    for entry in metadata:
+        img_path = input_dir / entry["filename"]
+        if not img_path.exists():
+            continue
+        img = Image.open(img_path).convert("RGBA")
+        images.append(img)
+        classes.append(entry.get("class", "unknown"))
+        actions.append(entry.get("action", "idle"))
+        directions.append(entry.get("direction", "front"))
+        captions.append(entry.get("caption", ""))
+        augmented_list.append(entry.get("augmented", False))
+        flipped_list.append(entry.get("flipped", False))
+        source_ids.append(entry.get("source_id", entry.get("id", 0)))
+
+    data = {
+        "image": images,
+        "class": classes,
+        "action": actions,
+        "direction": directions,
+        "caption": captions,
+        "augmented": augmented_list,
+        "flipped": flipped_list,
+        "source_id": source_ids,
+    }
+
+    features = Features({
+        "image": HFImage(),
+        "class": Value("string"),
+        "action": Value("string"),
+        "direction": Value("string"),
+        "caption": Value("string"),
+        "augmented": Value("bool"),
+        "flipped": Value("bool"),
+        "source_id": Value("int64"),
+    })
+
+    dataset = Dataset.from_dict(data, features=features)
+    return dataset, palette
+
+
 def main():
     parser = argparse.ArgumentParser(description="Push sprite dataset to HF Datasets")
     parser.add_argument("--input", "-i", default="data/processed",
@@ -43,57 +104,9 @@ def main():
     else:
         metadata = load_metadata(input_dir / "metadata.json")
 
-    # Load palette
-    palette_path = input_dir / "palette.json"
-    palette = []
-    if palette_path.exists():
-        with open(palette_path) as f:
-            palette = json.load(f)
-
     print(f"Loading {len(metadata)} sprites...")
 
-    images = []
-    classes = []
-    actions = []
-    directions = []
-    augmented_list = []
-    flipped_list = []
-    source_ids = []
-
-    for entry in metadata:
-        img_path = input_dir / entry["filename"]
-        if not img_path.exists():
-            continue
-        img = Image.open(img_path).convert("RGBA")
-        images.append(img)
-        classes.append(entry.get("class", "unknown"))
-        actions.append(entry.get("action", "idle"))
-        directions.append(entry.get("direction", "front"))
-        augmented_list.append(entry.get("augmented", False))
-        flipped_list.append(entry.get("flipped", False))
-        source_ids.append(entry.get("source_id", entry.get("id", 0)))
-
-    data = {
-        "image": images,
-        "class": classes,
-        "action": actions,
-        "direction": directions,
-        "augmented": augmented_list,
-        "flipped": flipped_list,
-        "source_id": source_ids,
-    }
-
-    features = Features({
-        "image": HFImage(),
-        "class": Value("string"),
-        "action": Value("string"),
-        "direction": Value("string"),
-        "augmented": Value("bool"),
-        "flipped": Value("bool"),
-        "source_id": Value("int64"),
-    })
-
-    dataset = Dataset.from_dict(data, features=features)
+    dataset, palette = build_dataset(metadata, input_dir)
 
     # Push to HF Hub
     api = HfApi(token=args.token)

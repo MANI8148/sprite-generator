@@ -201,8 +201,11 @@ usable, demoable checkpoint — not a pile of half-built infrastructure.
       (confirm half automated: `scripts/hf_token_hygiene.py` + CI step forbid
       committed credentials and require `${{ secrets.* }}` in workflows; rotating
       a leaked token itself remains a manual ops step)
-- [ ] Caption/tag your existing sprite dataset if going the LoRA route (this is on the
-      critical path for LoRA — can be done in parallel with Phase 0's other items)
+- [x] Caption/tag your existing sprite dataset if going the LoRA route (this is on the
+      critical path for LoRA — can be done in parallel with Phase 0's other items;
+      `data/scripts/caption_ai.py` now attaches a natural-language `caption` per
+      sprite via `labels_to_caption`, writes `<stem>.txt` caption files for
+      SD/LoRA trainers, and `push_to_hf.py` exposes a `caption` column)
 
 ### PHASE 1 — Ship the smallest real product (Character Generator + Godot export)
 

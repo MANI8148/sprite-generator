@@ -372,3 +372,141 @@ class TestLabelsToCaption:
         labels = {"class": "weapon", "action": "idle", "direction": "front"}
         result = labels_to_caption(labels)
         assert "idle" not in result  # 'idle' should not appear in caption
+
+
+class TestCaptionAndTag:
+    """Roadmap Phase 0: caption text must be attached to every tagged sprite."""
+
+    def test_adds_caption_field(self):
+        from data.scripts.caption_ai import caption_and_tag
+
+        entry = {"filename": "sprite_000000.png"}
+        result = caption_and_tag(
+            entry, {"class": "character", "action": "walk", "direction": "left"}
+        )
+        assert result["class"] == "character"
+        assert result["action"] == "walk"
+        assert result["direction"] == "left"
+        assert result["caption"] == "pixel art sprite of a character walk facing left"
+
+    def test_preserves_existing_entry_fields(self):
+        from data.scripts.caption_ai import caption_and_tag
+
+        entry = {"filename": "sprite_000000.png", "id": 7, "source": "/tmp/x.png"}
+        result = caption_and_tag(
+            entry, {"class": "enemy", "action": "attack", "direction": "front"}
+        )
+        assert result["id"] == 7
+        assert result["source"] == "/tmp/x.png"
+
+    def test_caption_is_nonempty_for_unknown_labels(self):
+        from data.scripts.caption_ai import caption_and_tag
+
+        result = caption_and_tag({}, {"class": "unknown", "action": "idle", "direction": "front"})
+        assert isinstance(result["caption"], str)
+        assert len(result["caption"]) > 0
+
+
+class TestWriteCaptionTxt:
+    """Roadmap Phase 0: SD/LoRA trainers need <stem>.txt caption files."""
+
+    def _make_sprite_dir(self, tmp_path):
+        img = Image.new("RGBA", (32, 32), (255, 0, 0, 255))
+        img.save(tmp_path / "sprite_000000.png")
+        return tmp_path
+
+    def test_writes_txt_file_next_to_image(self, tmp_path):
+        from data.scripts.caption_ai import write_caption_txt
+
+        out = self._make_sprite_dir(tmp_path)
+        entry = {"filename": "sprite_000000.png", "caption": "pixel art sprite of a character facing front"}
+        write_caption_txt(entry, out)
+        txt = out / "sprite_000000.txt"
+        assert txt.exists()
+        assert txt.read_text() == "pixel art sprite of a character facing front"
+
+    def test_skips_when_no_caption(self, tmp_path):
+        from data.scripts.caption_ai import write_caption_txt
+
+        out = self._make_sprite_dir(tmp_path)
+        write_caption_txt({"filename": "sprite_000000.png"}, out)
+        assert not (out / "sprite_000000.txt").exists()
+
+    def test_stem_based_filename(self, tmp_path):
+        from data.scripts.caption_ai import write_caption_txt
+
+        out = self._make_sprite_dir(tmp_path)
+        write_caption_txt(
+            {"filename": "sprite_000000.png", "caption": "a goblin sprite"},
+            out,
+        )
+        assert (out / "sprite_000000.txt").read_text() == "a goblin sprite"
+
+
+class TestPushToHFCaptionColumn:
+    """Roadmap Phase 0: the HF dataset must expose a caption column for LoRA."""
+
+    @pytest.fixture
+    def processed_dir(self, tmp_path):
+        dir_ = tmp_path / "processed"
+        dir_.mkdir()
+        for i in range(3):
+            arr = np.zeros((32, 32, 4), dtype=np.uint8)
+            arr[8:24, 8:24, :3] = [0, 255, 0]
+            arr[8:24, 8:24, 3] = 255
+            Image.fromarray(arr, "RGBA").save(dir_ / f"sprite_{i:06d}.png")
+        return dir_
+
+    @pytest.fixture
+    def metadata(self):
+        return [
+            {"id": 0, "filename": "sprite_000000.png", "class": "character",
+             "action": "idle", "direction": "front",
+             "caption": "pixel art sprite of a character facing front"},
+            {"id": 1, "filename": "sprite_000001.png", "class": "enemy",
+             "action": "attack", "direction": "left",
+             "caption": "pixel art sprite of a enemy attack facing left"},
+            {"id": 2, "filename": "sprite_000002.png", "class": "item",
+             "action": "idle", "direction": "right",
+             "caption": "pixel art sprite of a item facing right"},
+        ]
+
+    def test_dataset_has_caption_feature(self, processed_dir, metadata):
+        from data.scripts.push_to_hf import build_dataset
+
+        ds, palette = build_dataset(metadata, processed_dir)
+        assert "caption" in ds.features
+        assert str(ds.features["caption"]) == "Value('string')"
+
+    def test_caption_values_round_trip(self, processed_dir, metadata):
+        from data.scripts.push_to_hf import build_dataset
+
+        ds, _ = build_dataset(metadata, processed_dir)
+        assert ds["caption"][0] == "pixel art sprite of a character facing front"
+        assert ds["caption"][1] == "pixel art sprite of a enemy attack facing left"
+
+    def test_missing_caption_becomes_empty_string(self, processed_dir):
+        from data.scripts.push_to_hf import build_dataset
+
+        bare_meta = [
+            {"id": 0, "filename": "sprite_000000.png", "class": "character"},
+        ]
+        ds, _ = build_dataset(bare_meta, processed_dir)
+        assert ds["caption"][0] == ""
+
+    def test_missing_image_is_skipped(self, processed_dir, metadata):
+        from data.scripts.push_to_hf import build_dataset
+
+        metadata = [dict(m) for m in metadata]
+        metadata[1]["filename"] = "does_not_exist.png"
+        ds, _ = build_dataset(metadata, processed_dir)
+        assert len(ds) == 2
+
+    def test_palette_loaded(self, processed_dir, metadata):
+        import json as _json
+        from data.scripts.push_to_hf import build_dataset
+
+        with open(processed_dir / "palette.json", "w") as f:
+            _json.dump([(255, 0, 0), (0, 255, 0)], f)
+        _, palette = build_dataset(metadata, processed_dir)
+        assert len(palette) == 2

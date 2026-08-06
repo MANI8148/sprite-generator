@@ -152,6 +152,48 @@ class TestPipelineCaptionStep:
             meta = json.load(f)
         assert len(meta) >= 1
 
+    def test_caption_step_produces_caption_text(self, tmp_path):
+        raw_dir = tmp_path / "raw"
+        out_dir = tmp_path / "processed"
+        _make_synthetic_sprites(raw_dir, count=3)
+
+        rc = run_pipeline(
+            input_dir=str(raw_dir),
+            output_dir=str(out_dir),
+            skip_push=True,
+        )
+        assert rc == 0
+
+        with open(out_dir / "metadata_labeled.json") as f:
+            meta = json.load(f)
+        assert len(meta) > 0
+        for entry in meta:
+            assert "caption" in entry, f"entry missing caption: {entry}"
+            assert isinstance(entry["caption"], str)
+            assert len(entry["caption"]) > 0
+            assert "sprite" in entry["caption"].lower()
+
+    def test_caption_step_writes_txt_files(self, tmp_path):
+        raw_dir = tmp_path / "raw"
+        out_dir = tmp_path / "processed"
+        _make_synthetic_sprites(raw_dir, count=3)
+
+        rc = run_pipeline(
+            input_dir=str(raw_dir),
+            output_dir=str(out_dir),
+            skip_push=True,
+        )
+        assert rc == 0
+
+        with open(out_dir / "metadata_labeled.json") as f:
+            meta = json.load(f)
+        assert len(meta) > 0
+        for entry in meta:
+            stem = Path(entry["filename"]).stem
+            txt = out_dir / f"{stem}.txt"
+            assert txt.exists(), f"missing caption file: {txt}"
+            assert txt.read_text() == entry["caption"]
+
 
 class TestPipelineEndToEnd:
     def test_full_pipeline_skip_push(self, tmp_path):
