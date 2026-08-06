@@ -1,6 +1,7 @@
 import os
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from starlette.status import HTTP_429_TOO_MANY_REQUESTS
 from backend.api.routes import router, set_pipeline, set_job_store
@@ -14,7 +15,24 @@ from backend.modules.storage.database import create_database_library
 from backend.modules.logging.correlation import generate_correlation_id, set_correlation_id, get_correlation_id
 from backend.modules.logging.structured_logger import get_logger
 
+def resolve_allowed_origins() -> list:
+    """Build the list of origins permitted to call this API cross-origin.
+
+    Configured via the ``ALLOWED_ORIGINS`` environment variable as a
+    comma-separated list. Defaults to the local Next.js dev server and the
+    backend itself so the Phase 1 frontend can talk to the FastAPI service
+    out of the box.
+    """
+    raw = os.environ.get(
+        "ALLOWED_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000",
+    )
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    return origins or ["*"]
+
+
 app = FastAPI(title="AI Game Asset Pipeline API")
+
 app.include_router(router)
 app.include_router(auth_router)
 app.include_router(billing_router)
@@ -71,3 +89,16 @@ async def rate_limit_middleware(request: Request, call_next):
         return response
 
     return await call_next(request)
+
+
+# CORS must be the outermost middleware so browser preflight (OPTIONS)
+# requests from a different origin are answered with the right CORS headers
+# before auth / rate-limit middleware process them. Starlette applies the
+# last-added middleware outermost, so this is added last.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=resolve_allowed_origins(),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
