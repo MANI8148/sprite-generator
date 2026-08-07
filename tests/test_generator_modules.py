@@ -247,6 +247,36 @@ class TestGeneratorRegistry:
         gen = create_generator("nonexistent")
         assert gen is None
 
+    def test_create_wrapper_generators_default_base(self):
+        expected = {
+            "tileset": TilesetGenerator,
+            "environment": EnvironmentGenerator,
+            "prop": PropGenerator,
+            "ui": UIGenerator,
+            "animation": AnimationGenerator,
+            "portrait": PortraitGenerator,
+        }
+        for name, cls in expected.items():
+            gen = create_generator(name)
+            assert isinstance(gen, cls), f"{name} should construct a {cls.__name__}"
+            assert isinstance(gen._gen, SDGenerator), (
+                f"{name} should wrap a default SDGenerator base"
+            )
+
+    def test_create_wrapper_generators_with_explicit_base(self):
+        fake = FakeGenerator()
+        gen = create_generator("tileset", base_generator=fake)
+        assert isinstance(gen, TilesetGenerator)
+        assert gen._gen is fake
+
+    def test_create_wrapper_generators_are_usable(self):
+        fake = FakeGenerator()
+        for name in ["tileset", "environment", "prop", "ui", "animation", "portrait"]:
+            gen = create_generator(name, base_generator=fake)
+            images = gen.generate(prompt="test", num_images=1)
+            assert len(images) == 1
+            assert all(img.mode == "RGBA" for img in images)
+
     def test_register_custom_generator(self):
         class CustomGen(BaseGenerator):
             def load(self): pass

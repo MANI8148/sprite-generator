@@ -1,3 +1,4 @@
+import inspect
 from typing import Dict, Optional, Type
 from .base import BaseGenerator
 from .sd_generator import SDGenerator
@@ -38,4 +39,27 @@ def create_generator(name: str, **kwargs) -> Optional[BaseGenerator]:
     cls = get_generator_class(name)
     if cls is None:
         return None
+    return _instantiate(cls, **kwargs)
+
+
+def _requires_base_generator(cls: Type[BaseGenerator]) -> bool:
+    """Return True if the generator class needs a ``base_generator`` argument."""
+    try:
+        sig = inspect.signature(cls.__init__)
+    except (TypeError, ValueError):
+        return False
+    return "base_generator" in sig.parameters
+
+
+def _instantiate(cls: Type[BaseGenerator], **kwargs) -> BaseGenerator:
+    """Instantiate a generator class, defaulting the ``base_generator`` wrapper
+    argument to an :class:`SDGenerator` when the caller did not supply one.
+
+    Wrapper modules (tileset, environment, prop, ui, animation, portrait)
+    decorate a base generator. The registry is a public factory for these
+    modules, so constructing one without an explicit base should still work by
+    falling back to the canonical SD 1.5 generator.
+    """
+    if _requires_base_generator(cls) and not kwargs.get("base_generator"):
+        kwargs["base_generator"] = SDGenerator()
     return cls(**kwargs)
