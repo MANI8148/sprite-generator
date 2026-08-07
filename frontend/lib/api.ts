@@ -16,6 +16,13 @@ export interface GenerateRequest {
   upscale?: number;
   engine?: string;
   num_frames?: number;
+  palette_lock?: boolean;
+  palette_name?: string;
+  style_preset?: string;
+  pack_tileset?: boolean;
+  ip_adapter?: boolean;
+  ip_adapter_scale?: number;
+  reference_image?: string;
 }
 
 export interface GenerateSubmission {

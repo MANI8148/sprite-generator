@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from typing import Optional, List
 import os
 import uuid
@@ -161,6 +161,17 @@ class GenerateRequest(BaseModel):
     palette_name: str = "retro_16"
     style_preset: str = ""
     pack_tileset: bool = False
+    ip_adapter: bool = False
+    ip_adapter_scale: float = 0.6
+    reference_image: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _validate_ip_adapter(self):
+        if self.ip_adapter and not self.reference_image:
+            raise ValueError(
+                "reference_image is required when ip_adapter is enabled"
+            )
+        return self
 
 
 class BatchItem(BaseModel):
@@ -185,6 +196,17 @@ class BatchItem(BaseModel):
     palette_name: str = "retro_16"
     style_preset: str = ""
     pack_tileset: bool = False
+    ip_adapter: bool = False
+    ip_adapter_scale: float = 0.6
+    reference_image: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _validate_ip_adapter(self):
+        if self.ip_adapter and not self.reference_image:
+            raise ValueError(
+                "reference_image is required when ip_adapter is enabled"
+            )
+        return self
 
 
 class BatchGenerateRequest(BaseModel):
@@ -415,6 +437,9 @@ def _run_generation_job(pipe, controls, req, output_dir, job_id, user_id=None):
     config.pack_tileset = req.pack_tileset
     config.palette_lock = req.palette_lock
     config.palette_name = req.palette_name
+    config.ip_adapter = req.ip_adapter
+    config.ip_adapter_scale = req.ip_adapter_scale
+    config.reference_image = req.reference_image
     if req.style_preset:
         preset = STYLE_PRESETS.get(req.style_preset.lower())
         if preset:
@@ -650,6 +675,9 @@ def _run_batch_item(pipe, item, output_dir, batch_id, user_id=None):
     config.pack_tileset = item.pack_tileset
     config.palette_lock = item.palette_lock
     config.palette_name = item.palette_name
+    config.ip_adapter = item.ip_adapter
+    config.ip_adapter_scale = item.ip_adapter_scale
+    config.reference_image = item.reference_image
     if item.style_preset:
         preset = STYLE_PRESETS.get(item.style_preset.lower())
         if preset:
