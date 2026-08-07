@@ -76,7 +76,7 @@ Download
 - [x] More generator modules (tilesets, environments, UI, props)
 - [x] More exporters (GameMaker, Phaser)
 - [x] Cloud storage (Cloudflare R2)
-- [x] Incremental regeneration ("asset memory")
+- [x] Incremental regeneration ("asset memory") — dedup cache + `POST /regenerate` variant API
 
 ## Explicitly Deferred
 - [x] Billing / payments

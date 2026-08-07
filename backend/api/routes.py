@@ -242,6 +242,20 @@ class BatchStatusResponse(BaseModel):
     results: List[BatchResult] = []
 
 
+class RegenerateRequest(BaseModel):
+    base_id: str
+    num_variants: int = 4
+    seed_stride: int = 1
+    theme_override: str = ""
+
+
+class RegenerateResponse(BaseModel):
+    base_id: str
+    batch_id: str
+    job_ids: List[str]
+    num_variants: int
+
+
 _director: ProjectDirector = LLMProjectDirector()
 
 
@@ -406,6 +420,23 @@ def _upload_to_r2(storage: R2Storage, job_id: str, output_paths: list, zip_path:
         storage.upload_file(zip_path, f"jobs/{job_id}/sprite_package.zip")
 
 
+def _store_control_snapshot(meta: dict, req) -> None:
+    """Persist the generation controls so later regeneration can replicate
+    the exact style context (incremental regeneration / asset memory)."""
+    meta["seed"] = req.seed
+    meta["theme"] = req.theme
+    meta["control_snapshot"] = {
+        "asset_type": req.asset_type,
+        "view": req.view,
+        "animation": req.animation,
+        "palette": req.palette,
+        "sprite_size": req.sprite_size,
+        "theme": req.theme,
+        "style": req.style,
+        "seed": req.seed,
+    }
+
+
 def _deduct_credits_for_job(user_id, num_frames, credits):
     if user_id is None:
         return
@@ -494,6 +525,7 @@ def _run_generation_job(pipe, controls, req, output_dir, job_id, user_id=None):
         meta = {"view": req.view, "animation": req.animation, "palette": req.palette, "sprite_size": req.sprite_size, "style": req.style}
         meta["generation_hash"] = gen_hash
         meta["validation"] = result.validation[0] if result.validation else {}
+        _store_control_snapshot(meta, req)
 
         _library.add_asset(AssetRecord(
             asset_id=job_id,
@@ -737,6 +769,7 @@ def _run_batch_item(pipe, item, output_dir, batch_id, user_id=None):
         meta = {"view": item.view, "animation": item.animation, "palette": item.palette, "sprite_size": item.sprite_size, "style": item.style}
         meta["generation_hash"] = gen_hash
         meta["validation"] = result.validation[0] if result.validation else {}
+        _store_control_snapshot(meta, item)
 
         _library.add_asset(AssetRecord(
             asset_id=job_id,
@@ -838,6 +871,82 @@ def get_batch_status(batch_id: str):
         pending=pending,
         status=batch_status,
         results=results,
+    )
+
+
+@router.post("/regenerate", response_model=RegenerateResponse, status_code=202)
+def regenerate(
+    req: RegenerateRequest,
+    pipe: AssetPipeline = Depends(get_pipeline),
+    current_user: Optional[TokenData] = Depends(OptionalAuth),
+):
+    """Incremental regeneration (asset memory): spawn variant jobs for a base asset.
+
+    Each variant keeps the base asset's style context (asset type / view /
+    animation / palette / sprite size / style / theme) while varying the seed
+    deterministically, so identical regenerate requests are served from cache
+    and every distinct variant is stored in the asset library.
+    """
+    global _generator_loaded, _batch_jobs
+    if not _generator_loaded:
+        raise HTTPException(status_code=503, detail="Generator not set. POST /load-model first.")
+
+    if req.num_variants < 1 or req.num_variants > 64:
+        raise HTTPException(status_code=422, detail="num_variants must be between 1 and 64")
+
+    from backend.modules.asset_memory import AssetMemory
+    library = get_library()
+    memory = AssetMemory(library=library)
+    try:
+        _, variant_controls = memory.plan_variants(
+            req.base_id,
+            num_variants=req.num_variants,
+            seed_stride=req.seed_stride,
+            theme_override=req.theme_override,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Base asset {req.base_id} not found")
+
+    user_id = current_user.user_id if current_user else None
+    credits = get_credit_manager()
+    if user_id:
+        credits.ensure_user_exists(user_id)
+        total_cost = credits.get_generation_cost() * len(variant_controls)
+        if credits.get_balance(user_id) < total_cost:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=f"Insufficient credits. Need {total_cost}, have {credits.get_balance(user_id)}",
+            )
+
+    batch_id = str(uuid.uuid4())[:8]
+    job_ids: List[str] = []
+    queue = get_task_queue()
+
+    for i, ctrl in enumerate(variant_controls):
+        job_id = f"{batch_id}_{i}"
+        job_ids.append(job_id)
+        output_dir = _storage.ensure_output_dir(job_id)
+
+        item = GenerateRequest(
+            asset_type=ctrl.asset_type.value,
+            view=ctrl.view.value,
+            animation=ctrl.animation.value,
+            palette=ctrl.palette.value,
+            sprite_size=ctrl.sprite_size.value,
+            theme=ctrl.theme,
+            style=ctrl.style,
+            seed=ctrl.seed,
+        )
+        queue.submit(_run_batch_item, job_id, pipe, item, output_dir, batch_id, user_id)
+        _persist_job(job_id, JobStatus.PENDING.value, batch_id=batch_id)
+
+    _batch_jobs[batch_id] = job_ids
+
+    return RegenerateResponse(
+        base_id=req.base_id,
+        batch_id=batch_id,
+        job_ids=job_ids,
+        num_variants=len(job_ids),
     )
 
 
