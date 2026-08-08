@@ -91,6 +91,79 @@ class TestDeployScript:
         assert any(p.startswith("backend/") for p in paths), "Backend paths should keep backend/ prefix"
 
 
+class TestCollectFilesIgnoresCacheArtifacts:
+    """The deploy script must not upload Python cache artifacts to the Space
+    (ROADMAP MVP item: "Deploy Gradio demo on Hugging Face Spaces"). Uploading
+    __pycache__ / .pyc files bloats the Space and is never needed at runtime."""
+
+    def _make_tree(self, tmp_path, files: dict[str, str]) -> Path:
+        for rel, content in files.items():
+            p = tmp_path / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content)
+        return tmp_path
+
+    def test_excludes_pycache_directory(self, tmp_path):
+        from scripts.deploy_spaces import collect_files
+        src = self._make_tree(tmp_path, {
+            "app.py": "print('x')",
+            "__pycache__/app.cpython-310.pyc": "junk",
+        })
+        files = collect_files([src], flatten_dirs={src.name})
+        repo_paths = [repo for _local, repo in files]
+        assert repo_paths == ["app.py"], repo_paths
+
+    def test_excludes_pyc_files(self, tmp_path):
+        from scripts.deploy_spaces import collect_files
+        src = self._make_tree(tmp_path, {
+            "app.py": "print('x')",
+            "pkg/mod.pyc": "junk",
+            "pkg/mod.pyo": "junk",
+        })
+        files = collect_files([src], flatten_dirs={src.name})
+        repo_paths = [repo for _local, repo in files]
+        assert "pkg/mod.pyc" not in repo_paths
+        assert "pkg/mod.pyo" not in repo_paths
+        assert "app.py" in repo_paths
+
+    def test_keeps_normal_source_files(self, tmp_path):
+        from scripts.deploy_spaces import collect_files
+        src = self._make_tree(tmp_path, {
+            "app.py": "print('x')",
+            "README.md": "# Demo",
+            "requirements.txt": "gradio",
+            "pkg/__init__.py": "",
+        })
+        files = collect_files([src], flatten_dirs={src.name})
+        repo_paths = [repo for _local, repo in files]
+        assert set(repo_paths) == {"app.py", "README.md", "requirements.txt", "pkg/__init__.py"}
+
+    def test_should_skip_helpers(self):
+        from scripts.deploy_spaces import should_skip
+        assert should_skip(Path("app/__pycache__/x.cpython-310.pyc")) is True
+        assert should_skip(Path("app/x.pyc")) is True
+        assert should_skip(Path("app/x.pyo")) is True
+        assert should_skip(Path("app/.pytest_cache/README.md")) is True
+        assert should_skip(Path("app/.DS_Store")) is True
+        assert should_skip(Path("app/app.py")) is False
+        assert should_skip(Path("app/mod.py")) is False
+
+    def test_real_project_deploy_has_no_pycache(self):
+        from scripts.deploy_spaces import collect_files
+        files = collect_files(
+            [
+                Path(__file__).parent.parent / "gradio_app",
+                Path(__file__).parent.parent / "backend",
+            ],
+            flatten_dirs={"gradio_app"},
+        )
+        repo_paths = [repo for _local, repo in files]
+        assert not any("__pycache__" in p or p.endswith(".pyc") or p.endswith(".pyo")
+                       for p in repo_paths), "No cache artifacts may be uploaded"
+        assert any(p == "app.py" for p in repo_paths)
+        assert any(p.startswith("backend/") for p in repo_paths)
+
+
 class TestDeployWorkflow:
     def test_workflow_exists(self):
         assert WORKFLOW.exists(), "deploy_demo.yml workflow must exist"

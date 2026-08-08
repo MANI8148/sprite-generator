@@ -6,6 +6,27 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# Directories that are never needed at Space runtime and only bloat the upload.
+IGNORED_DIRS = {"__pycache__", ".pytest_cache", ".ipynb_checkpoints", ".git"}
+# File suffixes that are never needed at Space runtime.
+IGNORED_SUFFIXES = {".pyc", ".pyo"}
+# Other editor / OS noise files that must not be uploaded.
+IGNORED_FILENAMES = {".DS_Store", "Thumbs.db"}
+
+
+def should_skip(local_path: Path) -> bool:
+    """Return True for files that must not be uploaded to a Space.
+
+    Python bytecode caches (``__pycache__``, ``*.pyc``/``*.pyo``), test caches
+    and editor/OS noise are not needed by the running app and would pollute
+    the HF Spaces repo, so the deployment script excludes them.
+    """
+    if local_path.name in IGNORED_FILENAMES:
+        return True
+    if local_path.suffix in IGNORED_SUFFIXES:
+        return True
+    return any(part in IGNORED_DIRS for part in local_path.parts)
+
 
 def collect_files(source_dirs: list[Path], flatten_dirs: set[str] | None = None) -> list[tuple[str, str]]:
     """Collect (local_path, repo_path) pairs for upload.
@@ -29,6 +50,8 @@ def collect_files(source_dirs: list[Path], flatten_dirs: set[str] | None = None)
             root_path = Path(root)
             for fname in fnames:
                 local_path = root_path / fname
+                if should_skip(local_path):
+                    continue
                 if src_dir.name in flatten_dirs:
                     repo_path = str(local_path.relative_to(src_dir))
                 else:
