@@ -13,6 +13,7 @@ from backend.modules.rate_limiter import get_rate_limiter, is_exempt
 from backend.modules.tasks.queue import set_task_queue, create_task_queue
 from backend.modules.storage.database import create_database_library
 from backend.modules.logging.correlation import generate_correlation_id, set_correlation_id, get_correlation_id
+from backend.modules.logging.error_handlers import register_error_handlers
 from backend.modules.logging.structured_logger import get_logger
 
 def resolve_allowed_origins() -> list:
@@ -43,6 +44,8 @@ logger = get_logger("backend.main")
 set_pipeline(AssetPipeline())
 
 set_task_queue(create_task_queue())
+
+register_error_handlers(app)
 
 database_url = os.environ.get("DATABASE_URL")
 if database_url:

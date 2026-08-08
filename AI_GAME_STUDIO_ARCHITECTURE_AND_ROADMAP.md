@@ -267,7 +267,12 @@ Only start this once Phase 1 is live and you've used it enough to trust the pipe
 - [ ] Auth, rate limiting, Pydantic validation on all endpoints (you've done this exact
       pattern before on Eridian — same playbook applies here)
 - [ ] Billing/usage metering if this becomes a paid product
-- [ ] Proper error handling, structured logging, correlation IDs
+- [x] Proper error handling, structured logging, correlation IDs
+      (structured logging + correlation IDs in `backend/modules/logging/`, and
+      global exception handlers in `backend/modules/logging/error_handlers.py`
+      that return JSON 500/404/422 responses with the `X-Correlation-ID`
+      header and emit structured `unhandled_exception` / `http_exception` /
+      `validation_error` log records)
 - [x] Docker + deployment docs, CI/CD — multi-stage Dockerfile + docker-compose
       (db, redis, backend, frontend, test), DEPLOYMENT.md covering local/Docker/
       VPS/HF Spaces deployment, canonical CI at scripts/ci.yml run by the compose
