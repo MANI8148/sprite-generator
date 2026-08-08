@@ -268,7 +268,10 @@ Only start this once Phase 1 is live and you've used it enough to trust the pipe
       pattern before on Eridian — same playbook applies here)
 - [ ] Billing/usage metering if this becomes a paid product
 - [ ] Proper error handling, structured logging, correlation IDs
-- [ ] Docker + deployment docs, CI/CD
+- [x] Docker + deployment docs, CI/CD — multi-stage Dockerfile + docker-compose
+      (db, redis, backend, frontend, test), DEPLOYMENT.md covering local/Docker/
+      VPS/HF Spaces deployment, canonical CI at scripts/ci.yml run by the compose
+      test service
 - [ ] Incremental regeneration ("asset memory" — re-generate one variant of an existing
       asset while keeping style/seed context) — this is a genuine differentiator per the
       original roadmap's "competitive moat" section, worth prioritizing once core
