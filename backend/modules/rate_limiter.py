@@ -66,3 +66,16 @@ def set_rate_limiter(limiter: RateLimiter):
 
 
 EXEMPT_PATHS = {"/health", "/docs", "/openapi.json"}
+
+# Read-only job-status polling endpoints. The frontend polls these while a
+# generation runs (default 500ms interval), and a single generation can take
+# many seconds, so counting polls against the same per-IP budget as /generate
+# would rate-limit a legitimate user mid-poll.
+EXEMPT_PREFIXES = {"/status/", "/batch-status/"}
+
+
+def is_exempt(path: str) -> bool:
+    """Return True for paths that must not consume the per-IP rate budget."""
+    if path in EXEMPT_PATHS:
+        return True
+    return any(path.startswith(prefix) for prefix in EXEMPT_PREFIXES)

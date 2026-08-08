@@ -215,6 +215,10 @@ class TestGenerateIPAdapterAPI:
         tc = TestClient(app)
 
         fake_fallback = RecordingGenerator(num_images=1)
+        # The fallback generator is resolved inside the async job (a worker
+        # thread), so the patch must stay active until the job has finished —
+        # scoping it to just the POST would race the worker thread and let the
+        # real IPAdapterGenerator be constructed instead.
         with patch("backend.modules.generator.registry.create_generator") as mock_create:
             mock_create.return_value = fake_fallback
             resp = tc.post("/generate", json={
@@ -223,15 +227,15 @@ class TestGenerateIPAdapterAPI:
                 "ip_adapter_scale": 0.9,
                 "reference_image": reference_image,
             })
-        assert resp.status_code == 202
-        data = resp.json()
-        result = poll_job(tc, data["job_id"])
-        assert result["status"] == "done"
-        mock_create.assert_called_once_with(
-            "ip_adapter", ip_adapter_scale=0.9, lora_path=None
-        )
-        assert fake_fallback.last_kwargs is not None
-        assert "ip_adapter_image" in fake_fallback.last_kwargs
+            assert resp.status_code == 202
+            data = resp.json()
+            result = poll_job(tc, data["job_id"])
+            assert result["status"] == "done"
+            mock_create.assert_called_once_with(
+                "ip_adapter", ip_adapter_scale=0.9, lora_path=None
+            )
+            assert fake_fallback.last_kwargs is not None
+            assert "ip_adapter_image" in fake_fallback.last_kwargs
 
 
 class TestBatchIPAdapterAPI:

@@ -9,7 +9,7 @@ from backend.api.auth_routes import router as auth_router
 from backend.api.billing_routes import router as billing_router
 from backend.api.team_routes import router as team_router
 from backend.modules.pipeline.orchestrator import AssetPipeline
-from backend.modules.rate_limiter import get_rate_limiter, EXEMPT_PATHS
+from backend.modules.rate_limiter import get_rate_limiter, is_exempt
 from backend.modules.tasks.queue import set_task_queue, create_task_queue
 from backend.modules.storage.database import create_database_library
 from backend.modules.logging.correlation import generate_correlation_id, set_correlation_id, get_correlation_id
@@ -61,7 +61,7 @@ async def correlation_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    if request.url.path not in EXEMPT_PATHS:
+    if not is_exempt(request.url.path):
         limiter = get_rate_limiter()
         client_ip = request.client.host if request.client else "unknown"
 

@@ -338,6 +338,47 @@ class TestRateLimiter:
         assert resp2.headers["X-RateLimit-Remaining"] == "0"
         assert resp2.headers["X-RateLimit-Limit"] == "1"
 
+    def test_integration_status_polling_exempt_from_rate_limit(self, client):
+        """Job-status polling must not consume the per-IP generation budget.
+
+        The frontend polls /status/{job_id} while a job runs (500ms interval,
+        generation can take seconds), so counting every poll against the same
+        budget as /generate would 429 a legitimate user mid-poll.
+        """
+        limiter = RateLimiter(max_requests=2, window_seconds=60)
+        set_rate_limiter(limiter)
+        resp = client.post("/generate", json={"asset_type": "character"})
+        assert resp.status_code == 202
+        job_id = resp.json()["job_id"]
+        # Exhaust the generation budget, then poll well past it: all 200.
+        client.post("/generate", json={"asset_type": "enemy"})
+        for _ in range(5):
+            resp = client.get(f"/status/{job_id}")
+            assert resp.status_code == 200
+        # A fresh generation is still rate-limited.
+        resp = client.post("/generate", json={"asset_type": "vehicle"})
+        assert resp.status_code == 429
+
+    def test_integration_batch_status_polling_exempt_from_rate_limit(self, client):
+        limiter = RateLimiter(max_requests=1, window_seconds=60)
+        set_rate_limiter(limiter)
+        client.post("/generate", json={"asset_type": "character"})
+        for _ in range(5):
+            resp = client.get("/batch-status/nonexistent_batch")
+            assert resp.status_code == 404
+        assert client.post("/generate", json={"asset_type": "enemy"}).status_code == 429
+
+    def test_unit_is_exempt_exact_and_prefix_paths(self):
+        from backend.modules.rate_limiter import is_exempt, EXEMPT_PREFIXES, EXEMPT_PATHS
+        assert "/status/" in EXEMPT_PREFIXES
+        assert "/batch-status/" in EXEMPT_PREFIXES
+        for path in EXEMPT_PATHS:
+            assert is_exempt(path) is True
+        for prefix in EXEMPT_PREFIXES:
+            assert is_exempt(f"{prefix}abc123") is True
+        assert is_exempt("/generate") is False
+        assert is_exempt("/download/abc123") is False
+
     def test_remaining_decrements_correctly(self):
         limiter = RateLimiter(max_requests=5, window_seconds=60)
         ip = "10.0.0.1"
