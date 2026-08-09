@@ -217,8 +217,14 @@ a stranger could use to generate a sprite and download a Godot-ready file.
       download in `backend/api/routes.py`, wired in `backend/main.py`, and now
       `POST /load-model` fails gracefully with a structured 500 + `X-Correlation-ID`
       when the generator can't be loaded, so the endpoint is testable without GPU)
-- [ ] Deploy the model + API — start with **Hugging Face Spaces** (matches your existing
+- [x] Deploy the model + API — start with **Hugging Face Spaces** (matches your existing
       HF usage, has a free tier, avoids new infra to learn)
+      (the FastAPI model+API deploys to `darklord8777/sprite-generator-api` as a
+      Docker SDK Space: `spaces/api/` holds the Dockerfile + README config,
+      `scripts/deploy_spaces.py --api` uploads `backend/` + requirements with the
+      `backend/` prefix preserved, and the Space runs `uvicorn backend.main:app`
+      on port 7860; wire a `deploy_api.yml` GitHub Actions workflow once the
+      repo token has `workflows` permission)
 - [ ] Build a minimal frontend — a single page is enough: prompt/label inputs, generate
       button, image preview, download button. Next.js is fine, but plain HTML+JS is
       equally valid for v1 and faster to ship

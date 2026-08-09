@@ -152,6 +152,29 @@ python scripts/deploy_spaces.py --space-repo darklord8777/sprite-generator-demo 
 The Space README (`gradio_app/README.md`) carries the Spaces configuration
 (`sdk: gradio`, `app_file: app.py`).
 
+### FastAPI model + API (Docker SDK)
+
+The FastAPI backend itself deploys to
+`darklord8777/sprite-generator-api` as a Docker SDK Space. The Space
+config lives in `spaces/api/` (`Dockerfile` + `README.md` with
+`sdk: docker`) and the deploy script uploads `backend/`, the Space config,
+and `requirements.txt` with the `backend/` prefix preserved so the
+`backend.main:app` import path works.
+
+Deploy:
+
+```bash
+python scripts/deploy_spaces.py --api --token "$HF_TOKEN"
+```
+
+Use `--dry-run` to preview the files:
+
+```bash
+python scripts/deploy_spaces.py --api --dry-run
+```
+
+The Space listens on port 7860 (`uvicorn backend.main:app`).
+
 ## CI/CD
 
 The canonical CI workflow is `scripts/ci.yml`. It:

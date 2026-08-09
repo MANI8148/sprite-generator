@@ -102,9 +102,78 @@ def deploy(
     return 0
 
 
+# The API Space is deployed as a Docker SDK space: the FastAPI backend is
+# copied under backend/ and the space config (Dockerfile + README.md) lives in
+# spaces/api/, flattened to the Space root so the Docker build finds them.
+API_SPACE_DIR = REPO_ROOT / "spaces" / "api"
+
+
+def collect_api_space_files() -> list[tuple[str, str]]:
+    """Collect (local_path, repo_path) pairs for the FastAPI API Space.
+
+    The backend package is uploaded preserving its ``backend/`` prefix so the
+    Space's ``backend.main:app`` import path works, the ``spaces/api/`` config
+    is flattened to the Space root (Dockerfile, README.md), and the repository
+    ``requirements.txt`` is placed at the Space root for the Docker build.
+    """
+    files = collect_files(
+        [
+            REPO_ROOT / "backend",
+            API_SPACE_DIR,
+        ],
+        flatten_dirs={"api"},
+    )
+    requirements = REPO_ROOT / "requirements.txt"
+    if requirements.is_file():
+        files.append((str(requirements), "requirements.txt"))
+    return files
+
+
+def deploy_api_space(
+    space_repo: str,
+    hf_token: str,
+    dry_run: bool = False,
+) -> int:
+    """Upload the FastAPI model+API Space. Returns 0 on success, 1 on failure."""
+    try:
+        from huggingface_hub import HfApi
+    except ImportError:
+        print("Error: huggingface_hub not installed. Run: pip install huggingface_hub", file=sys.stderr)
+        return 1
+
+    files = collect_api_space_files()
+    if not files:
+        print("Error: no files found to deploy", file=sys.stderr)
+        return 1
+
+    api = HfApi()
+
+    for local_path, repo_path in files:
+        if dry_run:
+            print(f"[DRY RUN] Would upload: {local_path} -> {repo_path}")
+        else:
+            try:
+                api.upload_file(
+                    path_or_fileobj=local_path,
+                    path_in_repo=repo_path,
+                    repo_id=space_repo,
+                    repo_type="space",
+                    token=hf_token,
+                )
+                print(f"Uploaded {repo_path}")
+            except Exception as e:
+                print(f"Failed to upload {repo_path}: {e}", file=sys.stderr)
+                return 1
+
+    print("Deploy complete")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Deploy to Hugging Face Spaces")
     parser.add_argument("--space-repo", default=os.environ.get("HF_SPACE_REPO", "darklord8777/sprite-generator-demo"))
+    parser.add_argument("--api", action="store_true", help="Deploy the FastAPI model+API Space (Docker SDK) instead of the Gradio demo")
+    parser.add_argument("--api-space-repo", default=os.environ.get("HF_API_SPACE_REPO", "darklord8777/sprite-generator-api"))
     parser.add_argument("--token", default=os.environ.get("HF_TOKEN", ""))
     parser.add_argument("--dry-run", action="store_true", help="Print files without uploading")
     args = parser.parse_args()
@@ -112,6 +181,13 @@ def main():
     if not args.token and not args.dry_run:
         print("Error: HF_TOKEN not set. Use --token or set HF_TOKEN env var.", file=sys.stderr)
         return 1
+
+    if args.api:
+        return deploy_api_space(
+            args.api_space_repo,
+            args.token,
+            dry_run=args.dry_run,
+        )
 
     source_dirs = [
         REPO_ROOT / "gradio_app",
