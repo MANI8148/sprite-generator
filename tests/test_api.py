@@ -268,10 +268,62 @@ class TestHistory:
 
 
 class TestLoadModel:
-    @pytest.mark.skip(reason="Requires GPU with CUDA to load SD model")
-    def test_load_model_endpoint_exists(self, client):
+    def test_load_model_loads_generator(self, client, monkeypatch):
+        loaded = {}
+
+        class FakeSDGenerator:
+            def __init__(self, lora_path=None):
+                self.lora_path = lora_path
+
+            def load(self):
+                loaded["called"] = True
+
+            def generate(self, *args, **kwargs):
+                return FakeGenerator(num_images=1).generate(*args, **kwargs)
+
+            def unload(self):
+                pass
+
+        import backend.api.routes as routes
+        monkeypatch.setattr(routes, "_create_generator", lambda lora_path=None: FakeSDGenerator(lora_path))
+
+        resp = client.post("/load-model", json={"lora_path": "models/lora.safetensors"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "loaded"
+        assert data["lora_path"] == "models/lora.safetensors"
+        assert loaded["called"] is True
+
+        health = client.get("/health")
+        assert health.json()["generator_loaded"] is True
+
+        gen = client.post("/generate", json={"asset_type": "character"})
+        assert gen.status_code == 202
+        poll_job(client, gen.json()["job_id"])
+
+    def test_load_model_failure_returns_500(self, client, monkeypatch):
+        class BrokenGenerator:
+            def __init__(self, lora_path=None):
+                self.lora_path = lora_path
+
+            def load(self):
+                raise RuntimeError("no CUDA device")
+
+            def unload(self):
+                pass
+
+        import backend.api.routes as routes
+        monkeypatch.setattr(routes, "_create_generator", lambda lora_path=None: BrokenGenerator(lora_path))
+
         resp = client.post("/load-model", json={})
-        assert resp.status_code in (200, 500)
+        assert resp.status_code == 500
+        data = resp.json()
+        assert "Failed to load generator" in data["detail"]
+        assert "no CUDA device" in data["detail"]
+        assert resp.headers.get("X-Correlation-ID") is not None
+
+        health = client.get("/health")
+        assert health.json()["generator_loaded"] is False
 
 
 class TestRateLimiter:

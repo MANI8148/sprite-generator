@@ -954,12 +954,23 @@ class LoadModelRequest(BaseModel):
     lora_path: Optional[str] = None
 
 
+def _create_generator(lora_path: Optional[str] = None):
+    from backend.modules.generator.sd_generator import SDGenerator
+    return SDGenerator(lora_path=lora_path)
+
+
 @router.post("/load-model")
 def load_model(req: LoadModelRequest):
     global _generator_loaded
-    from backend.modules.generator.sd_generator import SDGenerator
-    gen = SDGenerator(lora_path=req.lora_path)
-    gen.load()
+    try:
+        gen = _create_generator(req.lora_path)
+        gen.load()
+    except Exception as exc:
+        _generator_loaded = False
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load generator: {exc}",
+        )
     get_pipeline().set_generator(gen)
     _generator_loaded = True
     return {"status": "loaded", "lora_path": req.lora_path}

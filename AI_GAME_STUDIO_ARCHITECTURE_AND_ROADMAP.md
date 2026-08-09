@@ -212,7 +212,11 @@ usable, demoable checkpoint — not a pile of half-built infrastructure.
 This phase = the "Realistic MVP architecture" diagram above. Goal: a working website
 a stranger could use to generate a sprite and download a Godot-ready file.
 
-- [ ] Build a minimal FastAPI service wrapping your chosen generator (`/generate` endpoint)
+- [x] Build a minimal FastAPI service wrapping your chosen generator (`/generate` endpoint)
+      (FastAPI service in `backend/` — `POST /generate` + job status polling + ZIP
+      download in `backend/api/routes.py`, wired in `backend/main.py`, and now
+      `POST /load-model` fails gracefully with a structured 500 + `X-Correlation-ID`
+      when the generator can't be loaded, so the endpoint is testable without GPU)
 - [ ] Deploy the model + API — start with **Hugging Face Spaces** (matches your existing
       HF usage, has a free tier, avoids new infra to learn)
 - [ ] Build a minimal frontend — a single page is enough: prompt/label inputs, generate
