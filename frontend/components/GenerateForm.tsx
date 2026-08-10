@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   generateAndWait,
   getDownloadUrl,
+  getPreviewUrl,
   GenerateRequest,
   JobStatusResponse,
 } from "../lib/api";
@@ -201,6 +202,19 @@ export default function GenerateForm() {
           }}
         >
           <h2>Result</h2>
+          {result.output_paths && result.output_paths.length > 0 && (
+            <img
+              src={getPreviewUrl(result.job_id)}
+              alt="Generated sprite preview"
+              style={{
+                maxWidth: "128px",
+                maxHeight: "128px",
+                imageRendering: "pixelated",
+                border: "1px solid #333",
+                borderRadius: "4px",
+              }}
+            />
+          )}
           <p>
             <strong>Job ID:</strong> {result.job_id}
           </p>
@@ -212,11 +226,6 @@ export default function GenerateForm() {
           {result.quality_tier && (
             <p>
               <strong>Quality:</strong> {result.quality_tier}
-            </p>
-          )}
-          {result.output_paths && result.output_paths.length > 0 && (
-            <p>
-              <strong>Outputs:</strong> {result.output_paths.join(", ")}
             </p>
           )}
           {result.zip_path && (

@@ -5,6 +5,7 @@ import { generateAndWait } from "../lib/api";
 jest.mock("../lib/api", () => ({
   generateAndWait: jest.fn(),
   getDownloadUrl: (jobId: string) => `http://localhost:8000/download/${jobId}`,
+  getPreviewUrl: (jobId: string) => `http://localhost:8000/preview/${jobId}`,
 }));
 
 const doneResult = {
@@ -36,7 +37,10 @@ describe("GenerateForm", () => {
       expect(screen.getByText("a pixel art hero sprite")).toBeTruthy();
     });
     expect(screen.getByText("clean")).toBeTruthy();
-    expect(screen.getByText("/tmp/abc123.png")).toBeTruthy();
+
+    const img = screen.getByAltText("Generated sprite preview") as HTMLImageElement;
+    expect(img).toBeTruthy();
+    expect(img.getAttribute("src")).toContain("/preview/abc123");
 
     const link = screen.getByText("Download ZIP");
     expect(link.getAttribute("href")).toContain("/download/abc123");

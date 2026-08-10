@@ -195,6 +195,10 @@ export function getDownloadUrl(jobId: string): string {
   return `${API_BASE}/download/${jobId}`;
 }
 
+export function getPreviewUrl(jobId: string, index: number = 0): string {
+  return `${API_BASE}/preview/${jobId}?index=${index}`;
+}
+
 export async function register(
   username: string,
   password: string

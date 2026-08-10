@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getHistory, HistoryEntry } from "../lib/api";
+import { getHistory, HistoryEntry, getDownloadUrl, getPreviewUrl } from "../lib/api";
 
 export default function HistoryList() {
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
@@ -24,6 +24,7 @@ export default function HistoryList() {
         <thead>
           <tr style={{ borderBottom: "1px solid #333", textAlign: "left" }}>
             <th style={{ padding: "0.5rem" }}>Job ID</th>
+            <th style={{ padding: "0.5rem" }}>Preview</th>
             <th style={{ padding: "0.5rem" }}>Prompt</th>
             <th style={{ padding: "0.5rem" }}>Quality</th>
             <th style={{ padding: "0.5rem" }}>Download</th>
@@ -33,6 +34,21 @@ export default function HistoryList() {
           {entries.map((entry) => (
             <tr key={entry.job_id} style={{ borderBottom: "1px solid #222" }}>
               <td style={{ padding: "0.5rem" }}>{entry.job_id}</td>
+              <td style={{ padding: "0.5rem" }}>
+                {entry.outputs && entry.outputs.length > 0 && (
+                  <img
+                    src={getPreviewUrl(entry.job_id)}
+                    alt="Asset preview"
+                    style={{
+                      maxWidth: "48px",
+                      maxHeight: "48px",
+                      imageRendering: "pixelated",
+                      border: "1px solid #333",
+                      borderRadius: "4px",
+                    }}
+                  />
+                )}
+              </td>
               <td style={{ padding: "0.5rem", maxWidth: "300px", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {entry.prompt}
               </td>

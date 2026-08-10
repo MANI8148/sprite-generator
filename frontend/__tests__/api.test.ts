@@ -5,6 +5,7 @@ import {
   generateAndWait,
   getHistory,
   getDownloadUrl,
+  getPreviewUrl,
   register,
   login,
   getMe,
@@ -202,6 +203,20 @@ describe("getDownloadUrl", () => {
   it("returns correct URL", () => {
     const url = getDownloadUrl("test-job");
     expect(url).toContain("/download/test-job");
+  });
+});
+
+describe("getPreviewUrl", () => {
+  it("returns preview URL with default index", () => {
+    const url = getPreviewUrl("test-job");
+    expect(url).toContain("/preview/test-job");
+    expect(url).toContain("index=0");
+  });
+
+  it("returns preview URL with explicit index", () => {
+    const url = getPreviewUrl("test-job", 3);
+    expect(url).toContain("/preview/test-job");
+    expect(url).toContain("index=3");
   });
 });
 

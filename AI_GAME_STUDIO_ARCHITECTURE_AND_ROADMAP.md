@@ -225,9 +225,13 @@ a stranger could use to generate a sprite and download a Godot-ready file.
       `backend/` prefix preserved, and the Space runs `uvicorn backend.main:app`
       on port 7860; wire a `deploy_api.yml` GitHub Actions workflow once the
       repo token has `workflows` permission)
-- [ ] Build a minimal frontend — a single page is enough: prompt/label inputs, generate
+- [x] Build a minimal frontend — a single page is enough: prompt/label inputs, generate
       button, image preview, download button. Next.js is fine, but plain HTML+JS is
       equally valid for v1 and faster to ship
+      (Next.js app in `frontend/` with Generate / History / Downloads / Settings /
+      Library / Billing pages; the backend serves individual generated frames via
+      `GET /preview/{job_id}` so the result panel, history table, and downloads list
+      render real image previews instead of raw filesystem paths)
 - [ ] Add background removal (`rembg`) so sprites have proper transparency
 - [ ] Add a sprite-sheet packer — use an existing library/tool rather than writing packing
       logic from scratch (e.g. a texture-atlas packer); output PNG + JSON metadata

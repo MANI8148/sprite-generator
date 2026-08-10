@@ -984,6 +984,46 @@ def download(job_id: str, storage: FileStorage = Depends(get_storage)):
     raise HTTPException(status_code=404, detail="Job not found or ZIP not available")
 
 
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+
+
+@router.get("/preview/{job_id}")
+def preview(
+    job_id: str,
+    index: int = 0,
+    storage: FileStorage = Depends(get_storage),
+):
+    """Serve a generated PNG frame so the frontend can show an image preview.
+
+    Resolves image outputs from the job's stored record (not from arbitrary
+    client-supplied paths) and returns the frame at ``index`` (default 0).
+    Working as the "image preview" half of the minimal-frontend roadmap item.
+    """
+    entry = storage.get_job(job_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Job not found")
+    outputs = entry.get("output_paths") or entry.get("outputs") or []
+    images = [p for p in outputs if str(p).lower().endswith(IMAGE_EXTENSIONS)]
+    if not images:
+        raise HTTPException(status_code=404, detail="No image outputs for this job")
+    if index < 0 or index >= len(images):
+        raise HTTPException(
+            status_code=422,
+            detail=f"index must be between 0 and {len(images) - 1}",
+        )
+    path = images[index]
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Image file not available")
+    media_type = "image/png"
+    if str(path).lower().endswith((".jpg", ".jpeg")):
+        media_type = "image/jpeg"
+    elif str(path).lower().endswith(".webp"):
+        media_type = "image/webp"
+    elif str(path).lower().endswith(".gif"):
+        media_type = "image/gif"
+    return FileResponse(path, media_type=media_type)
+
+
 @router.get("/history")
 def list_history(storage: FileStorage = Depends(get_storage)):
     return storage.list_jobs()
