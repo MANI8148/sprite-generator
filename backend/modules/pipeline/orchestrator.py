@@ -29,6 +29,8 @@ from ..generator.sd_generator import SDGenerator
 @dataclass
 class PipelineConfig:
     remove_bg: bool = True
+    remove_bg_model: str = "u2net"
+    remove_bg_alpha_threshold: int = 128
     reduce_palette: bool = True
     max_colors: int = 32
     pixel_cleanup: bool = True
@@ -144,7 +146,11 @@ class AssetPipeline:
         for img in images:
             p = img
             if self.config.remove_bg:
-                p = remove_background(p)
+                p = remove_background(
+                    p,
+                    model=self.config.remove_bg_model,
+                    alpha_threshold=self.config.remove_bg_alpha_threshold,
+                )
             if self.config.pixel_cleanup:
                 p = pixel_cleanup(p)
             if self.config.auto_center:

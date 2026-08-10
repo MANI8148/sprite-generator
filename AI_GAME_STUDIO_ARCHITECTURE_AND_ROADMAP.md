@@ -232,7 +232,13 @@ a stranger could use to generate a sprite and download a Godot-ready file.
       Library / Billing pages; the backend serves individual generated frames via
       `GET /preview/{job_id}` so the result panel, history table, and downloads list
       render real image previews instead of raw filesystem paths)
-- [ ] Add background removal (`rembg`) so sprites have proper transparency
+- [x] Add background removal (`rembg`) so sprites have proper transparency
+      (`backend/modules/postprocess/processor.py:remove_background` uses rembg
+      when available and falls back to corner-color removal; the rembg model
+      and alpha threshold are now configurable end-to-end via
+      `PipelineConfig.remove_bg_model` / `remove_bg_alpha_threshold` and the
+      `remove_bg_model` / `remove_bg_alpha_threshold` /generate request fields,
+      covered by `tests/test_rembg_background_removal.py`)
 - [ ] Add a sprite-sheet packer — use an existing library/tool rather than writing packing
       logic from scratch (e.g. a texture-atlas packer); output PNG + JSON metadata
 - [ ] Write ONE exporter: Godot. Research Godot's `.tres`/`.tscn`/`SpriteFrames` format,

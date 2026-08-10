@@ -149,6 +149,8 @@ class GenerateRequest(BaseModel):
     style: str = "pixel art"
     seed: int = -1
     remove_bg: bool = True
+    remove_bg_model: str = "u2net"
+    remove_bg_alpha_threshold: int = 128
     reduce_palette: bool = True
     max_colors: int = 32
     pixel_cleanup: bool = True
@@ -185,6 +187,8 @@ class BatchItem(BaseModel):
     seed: int = -1
     num_frames: int = 1
     remove_bg: bool = True
+    remove_bg_model: str = "u2net"
+    remove_bg_alpha_threshold: int = 128
     reduce_palette: bool = True
     max_colors: int = 32
     pixel_cleanup: bool = True
@@ -457,6 +461,8 @@ def _run_generation_job(pipe, controls, req, output_dir, job_id, user_id=None):
     from copy import deepcopy
     config = deepcopy(pipe.config)
     config.remove_bg = req.remove_bg
+    config.remove_bg_model = req.remove_bg_model
+    config.remove_bg_alpha_threshold = req.remove_bg_alpha_threshold
     config.reduce_palette = req.reduce_palette
     config.max_colors = req.max_colors
     config.pixel_cleanup = req.pixel_cleanup
@@ -696,6 +702,8 @@ def _run_batch_item(pipe, item, output_dir, batch_id, user_id=None):
     from copy import deepcopy
     config = deepcopy(pipe.config)
     config.remove_bg = item.remove_bg
+    config.remove_bg_model = item.remove_bg_model
+    config.remove_bg_alpha_threshold = item.remove_bg_alpha_threshold
     config.reduce_palette = item.reduce_palette
     config.max_colors = item.max_colors
     config.pixel_cleanup = item.pixel_cleanup

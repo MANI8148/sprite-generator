@@ -20,8 +20,8 @@ def remove_background(
     try:
         from rembg import remove as rembg_remove
 
-        rgba = to_rgba(image)
-        result = rembg_remove(rgba, model_name=model)
+        result = rembg_remove(to_rgba(image), model_name=model)
+        result = to_rgba(result)
         arr = np.array(result)
         arr[..., 3] = (arr[..., 3] > alpha_threshold).astype(np.uint8) * 255
         return Image.fromarray(arr)

@@ -24,6 +24,8 @@ def compute_generation_hash(
             "style": controls.style,
             "seed": controls.seed,
             "remove_bg": config.remove_bg,
+            "remove_bg_model": config.remove_bg_model,
+            "remove_bg_alpha_threshold": config.remove_bg_alpha_threshold,
             "reduce_palette": config.reduce_palette,
             "max_colors": config.max_colors,
             "pixel_cleanup": config.pixel_cleanup,
